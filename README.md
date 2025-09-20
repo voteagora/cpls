@@ -39,9 +39,6 @@ SERVER_PORT=8000
 # Scheduler Configuration
 SCHEDULER_INTERVAL_MINUTES=10
 
-# Job Processing Configuration
-MAX_JOB_PROCESSING_TIME_SECONDS=300
-
 # Environment
 ENVIRONMENT=development
 ```

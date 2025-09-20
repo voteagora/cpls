@@ -190,7 +190,7 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
             </div>
         </div>
 
-        <button class="refresh-btn" onclick="refreshPage()">= Refresh Now</button>
+        <button class="refresh-btn" onclick="refreshPage()">Refresh Now</button>
         <small style="color: #666;">(Auto-refreshes every 5 seconds)</small>
 
         <h2>Job List</h2>
