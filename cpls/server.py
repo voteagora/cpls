@@ -16,7 +16,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import uvicorn
 
 from ui import generate_dashboard_html
-from gcs import GCSUploader
+from gcs import GCSClient
 from jobs import JobQueue, Job, JobRequest, JobStatus
 
 from config import ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHEDULER_INTERVAL_MINUTES
@@ -25,7 +25,7 @@ from config import ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHED
 # Initialize components
 job_queue = JobQueue()
 scheduler = AsyncIOScheduler()
-gcs_uploader = GCSUploader(GCS_BUCKET_NAME)
+gcs_client = GCSClient(GCS_BUCKET_NAME)
 
 
 async def scheduled_job():
@@ -48,7 +48,8 @@ async def lifespan(app_instance: FastAPI):
     print("Starting server...")
 
     # Start job processor in background
-    asyncio.create_task(job_queue.process_jobs(gcs_uploader))
+    asyncio.create_task(job_queue.process_jobs(gcs_client))
+
 
     # Configure scheduler to run at specified interval
     scheduler.add_job(

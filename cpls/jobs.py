@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from enum import Enum
 
 if TYPE_CHECKING:
-    from gcs import GCSUploader
+    from gcs import GCSClient
 
 class JobStatus(str, Enum):
     PENDING = "pending"
@@ -50,7 +50,7 @@ class JobQueue:
         await self.queue.put(job)
         return job_id
 
-    async def process_jobs(self, gcs_uploader: 'GCSUploader'):
+    async def process_jobs(self, gcs_client: 'GCSClient'):
         """Process jobs sequentially from the queue"""
         self.processing = True
         while self.processing:
@@ -72,7 +72,7 @@ class JobQueue:
                     self.current_job = None
 
                     # Upload result to GCS
-                    await gcs_uploader.safe_upload_job_result(job)
+                    await gcs_client.safe_upload_job_result(job)
 
             except asyncio.CancelledError:
                 break
