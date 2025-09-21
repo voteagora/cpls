@@ -2,7 +2,7 @@ from google.cloud import storage
 from datetime import datetime
 import json
 import gzip
-from typing import Dict, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from config import ENVIRONMENT
 
@@ -107,6 +107,97 @@ class GCSClient:
 
         except Exception as e:
             print(f"Failed to read data from GCS blob {blob_name}: {e}")
+            return None
+
+    async def upload_ndjson(self, data: List[Dict], blob_name: str) -> bool:
+        """
+        Upload a list of dictionaries as gzipped NDJSON to GCS
+
+        Args:
+            data: List of dictionaries to upload
+            blob_name: Blob name ending with .ndjson (will be converted to .ndjson.gz)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.client:
+            print("GCS client not available, skipping upload")
+            return False
+
+        try:
+            # Ensure blob name ends with .ndjson
+            if not blob_name.endswith('.ndjson'):
+                raise ValueError("Blob name must end with '.ndjson'")
+
+            # Convert to NDJSON (newline-delimited JSON)
+            ndjson_data = '\n'.join(json.dumps(item) for item in data)
+            compressed_data = gzip.compress(ndjson_data.encode())
+
+            # Create compressed blob name
+            compressed_blob_name = blob_name.replace('.ndjson', '.ndjson.gz')
+
+            # Upload compressed version
+            compressed_blob = self.bucket.blob(compressed_blob_name)
+            compressed_blob.upload_from_string(compressed_data, content_type="application/gzip")
+            print(f"Uploaded compressed NDJSON to GCS: {compressed_blob_name}")
+
+            # Upload uncompressed version in development mode
+            if ENVIRONMENT == "development":
+                uncompressed_blob = self.bucket.blob(blob_name)
+                uncompressed_blob.upload_from_string(ndjson_data, content_type="application/x-ndjson")
+                print(f"Uploaded uncompressed NDJSON to GCS (dev): {blob_name}")
+
+            return True
+
+        except Exception as e:
+            print(f"Failed to upload NDJSON to GCS blob {blob_name}: {e}")
+            return False
+
+    async def read_ndjson(self, blob_name: str) -> Optional[List[Dict]]:
+        """
+        Read a gzipped NDJSON blob from GCS and return as list of dictionaries
+
+        Args:
+            blob_name: Blob name ending with .ndjson (will be converted to .ndjson.gz)
+
+        Returns:
+            List[Dict] if successful, None otherwise
+        """
+        if not self.client:
+            print("GCS client not available, cannot read")
+            return None
+
+        try:
+            # Ensure blob name ends with .ndjson
+            if not blob_name.endswith('.ndjson'):
+                raise ValueError("Blob name must end with '.ndjson'")
+
+            # Create compressed blob name
+            compressed_blob_name = blob_name.replace('.ndjson', '.ndjson.gz')
+
+            # Download compressed blob
+            compressed_blob = self.bucket.blob(compressed_blob_name)
+
+            if not compressed_blob.exists():
+                print(f"Blob {compressed_blob_name} does not exist")
+                return None
+
+            compressed_data = compressed_blob.download_as_bytes()
+
+            # Decompress and parse NDJSON
+            ndjson_data = gzip.decompress(compressed_data).decode()
+
+            # Parse each line as JSON
+            data = []
+            for line in ndjson_data.strip().split('\n'):
+                if line.strip():  # Skip empty lines
+                    data.append(json.loads(line))
+
+            print(f"Successfully read {len(data)} records from GCS: {compressed_blob_name}")
+            return data
+
+        except Exception as e:
+            print(f"Failed to read NDJSON from GCS blob {blob_name}: {e}")
             return None
 
     async def upload_job_result(self, job: 'Job'):
