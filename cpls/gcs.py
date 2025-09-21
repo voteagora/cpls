@@ -23,6 +23,10 @@ class GCSClient:
         except Exception as e:
             print(f"Warning: GCS client not initialized: {e}")
 
+    async def get_blob(self, blob_name):
+        blob = self.bucket.blob(blob_name)
+        return blob
+
     async def upload_dict(self, data: Dict, blob_name: str, cache_control: Optional[str] = None, metadata: Optional[Dict[str, str]] = None) -> bool:
         """
         Upload a Python dictionary as gzipped JSON to GCS
@@ -64,7 +68,7 @@ class GCSClient:
                 compressed_blob.metadata = metadata
 
             compressed_blob.upload_from_string(compressed_data, content_type="application/gzip")
-            print(f"Uploaded compressed data to GCS: {compressed_blob_name}")
+            # print(f"Uploaded compressed data to GCS: {compressed_blob_name}")
 
             # Upload uncompressed version in development mode
             if ENVIRONMENT == "development":
@@ -79,7 +83,7 @@ class GCSClient:
                     uncompressed_blob.metadata = metadata
 
                 uncompressed_blob.upload_from_string(json_data, content_type="application/json")
-                print(f"Uploaded uncompressed data to GCS (dev): {blob_name}")
+                # print(f"Uploaded uncompressed data to GCS (dev): {blob_name}")
 
             return True
 

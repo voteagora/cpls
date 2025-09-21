@@ -30,15 +30,21 @@ gcs_client = GCSClient(GCS_BUCKET_NAME)
 
 async def scheduled_job():
     """Function to be called by the scheduler periodically"""
-    job_id = await job_queue.add_job(
-        job_type="scheduled",
-        payload={
-            "message": "Scheduled job",
-            "timestamp": datetime.now().isoformat(),
-            "interval_minutes": SCHEDULER_INTERVAL_MINUTES
-        }
-    )
-    print(f"Added scheduled job: {job_id} (interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
+
+
+    for infra_dao_slug in ['scroll', 'cyber']:
+        job_id = await job_queue.add_job(
+            job_type="scheduled",
+            payload={
+                "message": f"Scheduled job - {infra_dao_slug}",
+                "timestamp": datetime.now().isoformat(),
+                # "interval_minutes": SCHEDULER_INTERVAL_MINUTES,
+                "source": "dao_node",
+                "infra_dao_slug": infra_dao_slug
+                
+            }
+        )
+        print(f"Added scheduled job: {job_id} (interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
 
 
 @asynccontextmanager
