@@ -23,13 +23,15 @@ class GCSClient:
         except Exception as e:
             print(f"Warning: GCS client not initialized: {e}")
 
-    async def upload_dict(self, data: Dict, blob_name: str) -> bool:
+    async def upload_dict(self, data: Dict, blob_name: str, cache_control: Optional[str] = None, metadata: Optional[Dict[str, str]] = None) -> bool:
         """
         Upload a Python dictionary as gzipped JSON to GCS
 
         Args:
             data: Dictionary to upload
             blob_name: Blob name ending with .json (will be converted to .json.gz)
+            cache_control: Cache-Control header value (e.g., "public, max-age=3600")
+            metadata: Key-value pairs to store as blob metadata
 
         Returns:
             bool: True if successful, False otherwise
@@ -52,12 +54,30 @@ class GCSClient:
 
             # Upload compressed version
             compressed_blob = self.bucket.blob(compressed_blob_name)
+
+            # Set cache control if provided
+            if cache_control:
+                compressed_blob.cache_control = cache_control
+
+            # Set metadata if provided
+            if metadata:
+                compressed_blob.metadata = metadata
+
             compressed_blob.upload_from_string(compressed_data, content_type="application/gzip")
             print(f"Uploaded compressed data to GCS: {compressed_blob_name}")
 
             # Upload uncompressed version in development mode
             if ENVIRONMENT == "development":
                 uncompressed_blob = self.bucket.blob(blob_name)
+
+                # Set cache control if provided
+                if cache_control:
+                    uncompressed_blob.cache_control = cache_control
+
+                # Set metadata if provided
+                if metadata:
+                    uncompressed_blob.metadata = metadata
+
                 uncompressed_blob.upload_from_string(json_data, content_type="application/json")
                 print(f"Uploaded uncompressed data to GCS (dev): {blob_name}")
 
@@ -109,13 +129,15 @@ class GCSClient:
             print(f"Failed to read data from GCS blob {blob_name}: {e}")
             return None
 
-    async def upload_ndjson(self, data: List[Dict], blob_name: str) -> bool:
+    async def upload_ndjson(self, data: List[Dict], blob_name: str, cache_control: Optional[str] = None, metadata: Optional[Dict[str, str]] = None) -> bool:
         """
         Upload a list of dictionaries as gzipped NDJSON to GCS
 
         Args:
             data: List of dictionaries to upload
             blob_name: Blob name ending with .ndjson (will be converted to .ndjson.gz)
+            cache_control: Cache-Control header value (e.g., "public, max-age=3600")
+            metadata: Key-value pairs to store as blob metadata
 
         Returns:
             bool: True if successful, False otherwise
@@ -138,12 +160,30 @@ class GCSClient:
 
             # Upload compressed version
             compressed_blob = self.bucket.blob(compressed_blob_name)
+
+            # Set cache control if provided
+            if cache_control:
+                compressed_blob.cache_control = cache_control
+
+            # Set metadata if provided
+            if metadata:
+                compressed_blob.metadata = metadata
+
             compressed_blob.upload_from_string(compressed_data, content_type="application/gzip")
             print(f"Uploaded compressed NDJSON to GCS: {compressed_blob_name}")
 
             # Upload uncompressed version in development mode
             if ENVIRONMENT == "development":
                 uncompressed_blob = self.bucket.blob(blob_name)
+
+                # Set cache control if provided
+                if cache_control:
+                    uncompressed_blob.cache_control = cache_control
+
+                # Set metadata if provided
+                if metadata:
+                    uncompressed_blob.metadata = metadata
+
                 uncompressed_blob.upload_from_string(ndjson_data, content_type="application/x-ndjson")
                 print(f"Uploaded uncompressed NDJSON to GCS (dev): {blob_name}")
 
@@ -218,8 +258,20 @@ class GCSClient:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         blob_name = f"jobs/{job.type}/{timestamp}_{job.id}.json"
 
-        # Use the generic upload method
-        return await self.upload_dict(job_data, blob_name)
+        # Use the generic upload method with job-specific metadata
+        job_metadata = {
+            "job_id": job.id,
+            "job_type": job.type,
+            "job_status": job.status,
+            "upload_timestamp": datetime.now().isoformat()
+        }
+
+        return await self.upload_dict(
+            job_data,
+            blob_name,
+            cache_control="private, max-age=86400",  # Cache for 24 hours
+            metadata=job_metadata
+        )
 
     async def safe_upload_job_result(self, job: 'Job'):
         """Helper function to safely upload job results to GCS"""
