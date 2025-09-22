@@ -4,11 +4,11 @@ A Python server for sequential job processing with queue management, scheduling,
 
 ## Features
 
-✅ **In-memory job queue** - Processes jobs sequentially (max 1 at a time) without blocking HTTP endpoints
-✅ **POST endpoint** (`/jobs`) - Receives new job notifications from external producers
-✅ **Scheduled jobs** - Automatically enqueues new jobs at configurable intervals
-✅ **Web UI** (`/`) - Dashboard showing all jobs and their processing status
-✅ **GCS integration** - Writes gzipped JSON results to Google Cloud Storage after each job
+- ✅ **In-memory job queue** - Processes jobs sequentially (max 1 at a time) without blocking HTTP endpoints
+- ✅ **POST endpoint** (`/jobs`) - Receives new job notifications from external producers
+- ✅ **Scheduled jobs** - Automatically enqueues new jobs at configurable intervals
+- ✅ **Web UI** (`/`) - Dashboard showing all jobs and their processing status
+- ✅ **GCS integration** - Writes gzipped JSON results to Google Cloud Storage after each job
 
 ## Installation
 
