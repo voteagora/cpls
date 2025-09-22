@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+import traceback
 
 from typing import Dict, Optional, List, TYPE_CHECKING
 from datetime import datetime
@@ -69,7 +70,22 @@ class JobQueue:
                     job.status = JobStatus.COMPLETED
                 except Exception as e:
                     job.status = JobStatus.FAILED
-                    job.error = str(e)
+                    # Capture the full error message and traceback
+                    error_message = str(e)
+                    full_traceback = traceback.format_exc()
+
+                    # Store error in job
+                    job.error = error_message
+
+                    # Print detailed error information
+                    print(f"\n{'='*60}")
+                    print(f"❌ JOB FAILED: {job.id}")
+                    print(f"Job Type: {job.type}")
+                    print(f"Error: {error_message}")
+                    print(f"{'='*60}")
+                    print("Full Traceback:")
+                    print(full_traceback)
+                    print(f"{'='*60}\n")
                 finally:
                     job.completed_at = datetime.now()
                     self.current_job = None
@@ -80,7 +96,13 @@ class JobQueue:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"Error processing job: {e}")
+                print(f"\n{'='*60}")
+                print(f"❌ CRITICAL ERROR in job processing loop:")
+                print(f"Error: {e}")
+                print(f"{'='*60}")
+                print("Full Traceback:")
+                print(traceback.format_exc())
+                print(f"{'='*60}\n")
 
     async def _execute_job(self, job: Job):
         """Execute the actual job logic"""

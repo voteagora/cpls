@@ -3,12 +3,10 @@ Job Processing Server with Queue, Scheduler, and GCS Integration
 """
 
 import asyncio
-import os
 from datetime import datetime
 from typing import Dict
 
 from contextlib import asynccontextmanager
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
@@ -17,7 +15,7 @@ import uvicorn
 
 from ui import generate_dashboard_html
 from gcs import GCSClient
-from jobs import JobQueue, Job, JobRequest, JobStatus
+from jobs import JobQueue, JobRequest, JobStatus
 
 from config import ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHEDULER_INTERVAL_MINUTES
 
@@ -28,23 +26,21 @@ scheduler = AsyncIOScheduler()
 gcs_client = GCSClient(GCS_BUCKET_NAME)
 
 
-async def scheduled_job():
+async def scheduled_job(infra_dao_slug):
     """Function to be called by the scheduler periodically"""
 
-
-    for infra_dao_slug in ['scroll', 'cyber']:
-        job_id = await job_queue.add_job(
-            job_type="scheduled",
-            payload={
-                "message": f"Scheduled job - {infra_dao_slug}",
-                "timestamp": datetime.now().isoformat(),
-                # "interval_minutes": SCHEDULER_INTERVAL_MINUTES,
-                "source": "dao_node",
-                "infra_dao_slug": infra_dao_slug
-                
-            }
-        )
-        print(f"Added scheduled job: {job_id} (interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
+    job_id = await job_queue.add_job(
+        job_type="scheduled",
+        payload={
+            "message": f"Scheduled job - {infra_dao_slug}",
+            "timestamp": datetime.now().isoformat(),
+            # "interval_minutes": SCHEDULER_INTERVAL_MINUTES,
+            "source": "dao_node",
+            "infra_dao_slug": infra_dao_slug
+            
+        }
+    )
+    print(f"Added scheduled job: {job_id} (interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
 
 
 @asynccontextmanager
@@ -56,20 +52,26 @@ async def lifespan(app_instance: FastAPI):
     # Start job processor in background
     asyncio.create_task(job_queue.process_jobs(gcs_client))
 
+    INFRA_DAO_SLUGS = ["optimism", "cyber", "scroll"]
 
-    # Configure scheduler to run at specified interval
-    scheduler.add_job(
-        scheduled_job,
-        'interval',
-        minutes=SCHEDULER_INTERVAL_MINUTES,
-        id='scheduled_job',
-        max_instances=1
-    )
+    for infra_dao_slug in INFRA_DAO_SLUGS:
+        # Configure scheduler to run at specified interval
+        scheduler.add_job(
+            scheduled_job,
+            'interval',
+            minutes=1,
+            id='scheduled_job-' + infra_dao_slug,
+            max_instances=1,
+            kwargs = {'infra_dao_slug': infra_dao_slug}
+        )
+
     scheduler.start()
     print(f"Scheduler configured to run every {SCHEDULER_INTERVAL_MINUTES} minutes")
 
-    # Run first scheduled job immediately
-    await scheduled_job()
+    for infra_dao_slug in INFRA_DAO_SLUGS:
+      # Run first scheduled job immediately
+        await scheduled_job(infra_dao_slug)
+
 
     print("Server started: Job processor and scheduler are running")
 

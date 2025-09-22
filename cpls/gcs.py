@@ -26,6 +26,10 @@ class GCSClient:
     async def get_blob(self, blob_name):
         blob = self.bucket.blob(blob_name)
         return blob
+    
+    async def list_blobs(self, prefix):
+        blobs = self.bucket.list_blobs(prefix=prefix)
+        return blobs
 
     async def upload_dict(self, data: Dict, blob_name: str, cache_control: Optional[str] = None, metadata: Optional[Dict[str, str]] = None) -> bool:
         """
