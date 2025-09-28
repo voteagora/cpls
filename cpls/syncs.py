@@ -1,5 +1,9 @@
 
-import os
+# EAS
+# - based off blocks, not actual time
+# - end block not in schema, so we need to upgrade the schema
+
+import os, time
 
 import requests as req
 
@@ -9,18 +13,323 @@ from config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALC
 import hashlib
 import json
 
+from pprint import pprint
+
+FIVE_MINUTES_IN_SECONDS = 5 * 60 * 60
+
 def json_hash(obj, algo="sha256"):
     # Serialize with sorted keys and no whitespace differences
     encoded = json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.new(algo, encoded).hexdigest()
 
-class DaoNodeSync:
-    def __init__(self, infra_dao_slug):
+class SkipProposal(Exception):
+    def __init__(self, reason, proposal_id):
+        self.reason = reason
+        self.proposal_id = proposal_id
+    
+    def __str__(self):
+        return f"[PROP-{self.proposal_id}] {self.reason}"
+
+class BlockNotFound(Exception):
+    pass
+
+class BlockCacheClient:
+    def __init__(self, alchemy_api_key):
+        self.alchemy_api_key = alchemy_api_key
+
+    def headers(self):
+
+        return {'alchemy-api-key': self.alchemy_api_key} 
+    
+    def return_ts(self, resp):
+
+        ts = resp.get('ts', None)
+        
+        if ts:
+            return ts
+        
+        msg = resp.get('msg', None)
+
+        if msg == 'block not found':
+            raise BlockNotFound()
+        
+        raise Exception("Unhandled client response")
+
+    def get_exact_blocktime(self, chain_id, block_number):
+
+        headers = self.headers()
+
+        resp = req.get(f"https://blacache-production.up.railway.app/exact_blocktime/{chain_id}/{block_number}", headers=headers).json()
+        
+        return self.return_ts(resp)
+    
+    def get_estimated_blocktime(self, chain_id, block_number):
+
+        headers = self.headers()
+
+        resp = req.get(f"https://blacache-production.up.railway.app/estimated_blocktime/{chain_id}/{block_number}", headers=headers).json()
+
+        return self.return_ts(resp)
+    
+    def get_blocktime(self, chain_id, block_number):
+
+        try:
+            return self.get_exact_blocktime(chain_id, block_number)
+        except BlockNotFound:    
+            return self.get_estimated_blocktime(chain_id, block_number)
+
+class Sync:
+    def __init__(self, infra_dao_slug, reset=False):
+
         self.infra_dao_slug = infra_dao_slug
+        self.reset = reset
+
+        self.bc = BlockCacheClient(ALCHEMY_API_KEY)
+
+    def calc_cache_control(self, liveness):
+        if liveness == 'live':
+            if ENVIRONMENT == 'production':
+                max_age = 30 * SCHEDULER_INTERVAL_MINUTES # half a scheduler cycle
+            else:
+                max_age = 10 * SCHEDULER_INTERVAL_MINUTES # 1/6th of a scheduler cycle - just enough to see if it's working.
+            
+        elif liveness == 'archived':
+            if ENVIRONMENT == 'production':
+                max_age = 365 * 24 * 60 * 60 # 1 year
+            else:
+                max_age = 2 * 60 # 2 minutes
+
+        return 'public, max-age=' + str(max_age)
+        
+    async def refresh_source_list(self, gcs_client: 'GCSClient'):
+
+        blobs = await gcs_client.list_blobs(prefix=f"data/{self.infra_dao_slug}/proposal/{self.SOURCE}/raw/") 
+
+        proposal_list = []
+
+        for blob in blobs:
+
+            if not blob.name.endswith('.json'):
+                continue
+            
+            blob.reload() # refreshes metadata from server
+            data = await gcs_client.read_dict(blob.name)
+
+            del data['description']
+            del data['data_eng_properties']['hash']
+
+            proposal_list.append(data)
+
+        proposal_list.sort(key=lambda x: x['end_block'], reverse=True)
+
+        await gcs_client.upload_ndjson(proposal_list, f"data/{self.infra_dao_slug}/proposal_list/{self.SOURCE}/raw.ndjson")
+            
+    async def refresh_full_list(self, gcs_client: 'GCSClient'):
+
+        blobs = await gcs_client.list_blobs(prefix=f"data/{self.infra_dao_slug}/proposal_list/") 
+
+        proposal_list = []
+
+        for blob in blobs:
+
+            if not blob.name.endswith('.ndjson'):
+                continue
+            
+            blob.reload() # refreshes metadata from server
+            data = await gcs_client.read_ndjson(blob.name)
+
+            proposal_list.extend(data)
+        
+        try:
+            proposal_list.sort(key=lambda x: int(x['end_blocktime']), reverse=True)
+        except:
+            for prop in proposal_list:
+                print(prop['id'], prop['end_blocktime'])
+
+        await gcs_client.upload_ndjson(proposal_list, f"data/{self.infra_dao_slug}/proposal_list.full.ndjson")
+
+    def proposal_blob_name(self, proposal_id):
+        return f"data/{self.infra_dao_slug}/proposal/{self.SOURCE}/raw/{proposal_id}.json"
+
+    def calculate_proposal_hash(self, proposal):
+        return json_hash(proposal)
+    
+    def check_existing_proposal_hash(self, proposal, existing_proposal_hash):
+
+        proposal_hash = self.calculate_proposal_hash(proposal)
+
+        if existing_proposal_hash == proposal_hash and not self.reset:
+            msg = f"content state is unchanged"
+            raise SkipProposal(msg, proposal_id=proposal['id'])
+
+    async def read_existing_raw_proposal_hash_if_exists(self, proposal_id):
+
+        blob_name = self.proposal_blob_name(proposal_id)
+
+        blob = await gcs_client.get_blob(blob_name)
+        try:
+            exists = blob.exists()
+        except Exception as e:
+            msg = "Existence check failed, we can't proceed, we're blind.  We don't want to corrupt in case of the source pruning."
+            print(e)
+            raise SkipProposal(msg, proposal_id=proposal_id)
+
+        if exists:
+            try:
+                blob.reload()
+            except Exception as e:
+                msg = "Reload failed, we can't proceed, we're blind.  We don't want to corrupt in case of the source pruning."
+                print(e)
+                raise SkipProposal(msg, proposal_id=proposal_id)
+    
+            existing_liveness = blob.metadata['liveness']
+            existing_proposal_hash = blob.metadata['hash']
+        else:                
+            existing_liveness = 'new'
+            existing_proposal_hash = 'no-hash'
+
+        if existing_liveness == 'archived' and not self.reset:
+            msg = f"Proposal is in archival state."
+            raise SkipProposal(msg, proposal_id=proposal_id)
+
+        return blob, existing_liveness, existing_proposal_hash
+        
+    def get_timestamp(self, chain_id, block_number):
+
+        blocktime = self.bc.get_blocktime(chain_id, block_number)
+
+        return blocktime
+    
+    async def overwrite_proposal(self, proposal, proposal_hash, liveness, gcs_client: 'GCSClient'):
+
+        data_eng_properties = {
+            'liveness': liveness,
+            'source' : 'eas',
+            'hash' : proposal_hash
+        }
+
+        metadata = {'proposal_id': proposal['id']}
+        metadata.update(data_eng_properties)
+
+        proposal['data_eng_properties'] = data_eng_properties
+    
+        cache_contr = self.calc_cache_control(liveness)
+
+        blob_name = self.proposal_blob_name(proposal['id'])
+        
+        await gcs_client.upload_dict(proposal, blob_name, metadata=metadata, cache_control=cache_contr)
+
+
+class EASSync(Sync):
+
+    SOURCE = 'eas'
+
+    def __init__(self, infra_dao_slug, reset=False):
+        self.infra_dao_slug = infra_dao_slug
+        self.reset = reset
+    
+    async def refresh_list(self, gcs_client: 'GCSClient'):
+
+
+        ######################################
+        # Step 1 - Get a list of recent-ish proposals.  Think either the "full list of any proposal ever" OR "just stuff that may or may not be ready to archive"
+        #
+
+        # THIS IS TOTALLY FLAWED LOGIC, the point is to make a file format that can be consumed as a second source.
+        known_create_attestations = {}
+        easa = """0xc89066cf84cc86c3cbb9cc148dbf7514a1b897ad5dbaf878716f6beee89fd6ff
+                0xe73cdaca33221711fddfe6c7302b0f1d1d9bf093a9d04643710890d74b865fec
+                0xffeefe5d1263a0b1275e407c4c8ecbf87031d7bb2f25b5a9911b14eacee974bc
+                0x46e273e2820a4254c6d3b79cf101d82dac8a25abb4eb0e8dd940c4758553fac0
+                0xd70f9590ca82e2d263d95ba72a76c9bc9e2a6007c5c906a699794776a2f47d4d
+                0x0701b609c2904f1b05bdaa38ab898ad74478c3a3eff4e0691a60509090ef2af2
+                0x42247c00390396ad0d598e3ec39bc349c6a3f17fe44bcf574707a904960c127e""".split("\n")
+        known_create_attestations['optimism'] = [e.strip() for e in easa]
+        # End of flawed logic
+
+        headers = {'alchemy-api-key': ALCHEMY_API_KEY}
+
+        anything_changed = False
+        for proposals_uid in known_create_attestations[self.infra_dao_slug]:
+
+            for chain_id in [10, 1]:
+
+                print(proposals_uid)
+
+                url = f"https://blacache-production.up.railway.app/decoded_eas/{chain_id}/attestation/{proposals_uid}"
+                response = req.get(url, headers=headers)
+
+                if response.status_code != 200:
+                    print(f"Failed to fetch proposal {proposals_uid}")
+                    continue
+
+                proposal_attestation = response.json()
+                pprint(proposal_attestation)
+
+                if proposal_attestation['attestation']['uid'] == '0x0000000000000000000000000000000000000000000000000000000000000000':
+                    print(f"Failed to fetch proposal {proposals_uid}")
+                    continue
+
+                proposal = proposal_attestation['attestation']
+                proposal['chain_id'] = proposal_attestation['chain_id']
+                proposal.update(proposal_attestation['decoded_data'])
+                del proposal['data']
+                proposal['resolver'] = proposal_attestation['schema']['resolver']
+
+                proposal_id = proposal['id']
+
+                try:
+                    existing_proposal_hash = await self.read_existing_raw_proposal_hash_if_exists(proposal_id)
+                except SkipProposal as e:
+                    print(e)
+                    continue
+
+                # TODO - get current state of votes here..
+            
+                try:
+                    proposal_hash = self.check_proposal_hash(proposal, existing_proposal_hash)
+                except SkipProposal as e:
+                    print(e)
+                    continue
+
+
+                # This section here, enriches the proposal object, in a way that will only update, 
+                # if the hash for the proposal's state changes. Downstream consumers can either use it, accepting 
+                # the caveate, or re-calculate it.
+
+                start_block = proposal['start_block']
+                start_blocktime = self.get_timestamp(chain_id, start_block) 
+                proposal['start_blocktime'] = start_blocktime
+
+                end_block = start_block + 259200 # TODO - the EAS Attestation needs the end-block timestamp.
+
+                proposal['end_block'] = end_block
+                end_blocktime = self.get_timestamp(chain_id, end_block) 
+                proposal['end_blocktime'] = end_blocktime
+
+                liveness = 'live'
+
+                cur_time = int(time.time())                
+
+                if cur_time > proposal['end_blocktime'] + FIVE_MINUTES_IN_SECONDS:
+                    liveness = 'archived'
+
+                anything_changed = True
+
+                self.overwrite_proposal(proposal, liveness, proposal_hash)
+
+            if anything_changed:
+
+                await self.refresh_source_list(gcs_client)
+
+                await self.refresh_full_list(gcs_client)
+
+
+class DaoNodeSync(Sync):
+
+    SOURCE = 'dao_node'
     
     async def refresh_list(self, gcs_client: 'GCSClient'): 
-
-        RESET = False
 
         config_response = req.get(f"http://{self.infra_dao_slug}.prod.agoradata.xyz/deployment")
         chain_id = config_response.json()['deployment']['chain_id']
@@ -34,32 +343,10 @@ class DaoNodeSync:
             proposal_id = proposal_info['id']
             print(proposal_id)
 
-            blob_name = f"data/{self.infra_dao_slug}/proposal/dao_node/raw/{proposal_id}.json"
-
-            blob = await gcs_client.get_blob(blob_name)
-
             try:
-                exists = blob.exists()
-            except Exception as e:
-                print("Existence check failed, we can't proceed, we're blind.  We don't want to corrupt in case of the source pruning.")
+                existing_proposal_hash = await self.read_existing_raw_proposal_hash_if_exists(proposal_id)
+            except SkipProposal as e:
                 print(e)
-                continue
-
-            if exists:
-                try:
-                    blob.reload()
-                except Exception as e:
-                    print("Reload failed, we can't proceed, we're blind.  We don't want to corrupt in case of the source pruning.")
-                    print(e)
-                    continue
-                existing_liveness = blob.metadata['liveness']
-                existing_proposal_hash = blob.metadata['hash']
-            else:                
-                existing_liveness = 'new'
-                existing_proposal_hash = 'no-hash'
-
-            if existing_liveness == 'archived' and not RESET:
-                print(f"Skipping proposal {proposal_id} on archival state.")
                 continue
             
             try:
@@ -70,12 +357,12 @@ class DaoNodeSync:
                 print(e)
                 continue
 
-            proposal_hash = json_hash(proposal) + '1'
-
-            if existing_proposal_hash == proposal_hash and not RESET:
-                print(f"Skipping proposal {proposal['id']} on content-unchanged state.")
+            try:
+                proposal_hash = self.check_proposal_hash(proposal, existing_proposal_hash)
+            except SkipProposal as e:
+                print(e)
                 continue
-
+        
             liveness = 'live'
             if 'execute_event' in proposal or 'cancel_event' in proposal:
                 liveness = 'archived'
@@ -86,98 +373,33 @@ class DaoNodeSync:
             # if the hash for the proposal's state changes. Downstream consumers can either use it, accepting 
             # the caveate, or re-calculate it.
 
-            headers = {'alchemy-api-key': ALCHEMY_API_KEY}
-
             start_block = proposal['start_block']
-            start_blocktime = req.get(f"https://blacache-production.up.railway.app/exact_blocktime/{chain_id}/{start_block}", headers=headers).text
+            start_blocktime = self.get_timestamp(chain_id, start_block) 
             proposal['start_blocktime'] = start_blocktime
 
             end_block = proposal['end_block']
-            end_blocktime = req.get(f"https://blacache-production.up.railway.app/exact_blocktime/{chain_id}/{end_block}", headers=headers).text
-            proposal['end_blocktime'] = end_blocktime
+            proposal['end_blocktime'] = self.get_timestamp(chain_id, end_block)
 
-            data_eng_properties = {
-                'liveness': liveness,
-                'source' : 'dao_node',
-                'hash' : proposal_hash
-            }
-
-            metadata = {'proposal_id': proposal['id']}
-            metadata.update(data_eng_properties)
-
-            proposal['data_eng_properties'] = data_eng_properties
-            
-            if liveness == 'live':
-                if ENVIRONMENT == 'production':
-                    max_age = 30 * SCHEDULER_INTERVAL_MINUTES # half a scheduler cycle
-                else:
-                    max_age = 10 * SCHEDULER_INTERVAL_MINUTES # 1/6th of a scheduler cycle - just enough to see if it's working.
-                
-            elif liveness == 'archived':
-                if ENVIRONMENT == 'production':
-                    max_age = 365 * 24 * 60 * 60 # 1 year
-                else:
-                    max_age = 2 * 60 # 2 minutes
-
-            cache_contr = 'public, max-age=' + str(max_age)
-            
-            await gcs_client.upload_dict(proposal, blob_name, metadata=metadata, cache_control=cache_contr)
+            self.overwrite_proposal(proposal, liveness, proposal_hash)
 
         if anything_changed:
-           
-            blobs = await gcs_client.list_blobs(prefix=f"data/{self.infra_dao_slug}/proposal/dao_node/raw/") 
-
-            proposal_list = []
-
-            for blob in blobs:
-
-                if not blob.name.endswith('.json'):
-                    continue
-                
-                blob.reload() # refreshes metadata from server
-                data = await gcs_client.read_dict(blob.name)
-
-                del data['description']
-                del data['data_eng_properties']['hash']
-
-                proposal_list.append(data)
-
-            proposal_list.sort(key=lambda x: x['end_block'], reverse=True)
-
-            await gcs_client.upload_ndjson(proposal_list, f"data/{self.infra_dao_slug}/proposal_list/dao_node/raw.ndjson")
-
-
-
-            blobs = await gcs_client.list_blobs(prefix=f"data/{self.infra_dao_slug}/proposal_list/") 
-
-            proposal_list = []
-
-            for blob in blobs:
-
-                if not blob.name.endswith('.ndjson'):
-                    continue
-                
-                blob.reload() # refreshes metadata from server
-                data = await gcs_client.read_ndjson(blob.name)
-
-                proposal_list.extend(data)
-
-            await gcs_client.upload_ndjson(proposal_list, f"data/{self.infra_dao_slug}/proposal_list/dao_node/raw.ndjson")
-
-
-
-
-
-
-                
+            await self.refresh_source_list(gcs_client)
+            await self.refresh_full_list(gcs_client)
 
 
 
 if __name__ == "__main__":
 
+    import asyncio
 
     
-    dns = DaoNodeSync('scroll')
+    dns = DaoNodeSync('optimism')
 
     gcs_client = GCSClient(GCS_BUCKET_NAME)
-    dns.refresh_list(gcs_client)
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(dns.refresh_list(gcs_client))
+
+    loop.close()
+
+    # BlockCacheClient(ALCHEMY_API_KEY).get_blocktime(10, 141699303)
