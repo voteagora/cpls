@@ -1,6 +1,6 @@
-# Job Processing Server
+# Common Proposal Listing Service 
 
-A Python server for sequential job processing with queue management, scheduling, and Google Cloud Storage integration.
+A Python server for sequential job processing with queue management, scheduling, and Google Cloud Storage integration, that builds a common list of proposals.
 
 ## Features
 
