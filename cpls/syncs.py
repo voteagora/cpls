@@ -1,14 +1,16 @@
 
-# EAS
+# Current proflems with existing EAS
 # - based off blocks, not actual time
 # - end block not in schema, so we need to upgrade the schema
 
-import os, time
+from collections import defaultdict
+import time
 
 import requests as req
+import asyncpg
 
 from gcs import GCSClient
-from config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY
+from config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY, DATABASE_URL
 
 import hashlib
 import json
@@ -16,6 +18,21 @@ import json
 from pprint import pprint
 
 FIVE_MINUTES_IN_SECONDS = 5 * 60 * 60
+
+class PostgreSQLClient:
+    def __init__(self, database_url):
+        self.database_url = database_url
+        self.pool = None
+
+    async def connect(self):
+        if not self.pool:
+            self.pool = await asyncpg.create_pool(self.database_url, min_size=1, max_size=10)
+        return self.pool
+
+    async def disconnect(self):
+        if self.pool:
+            await self.pool.close()
+            self.pool = None
 
 def json_hash(obj, algo="sha256"):
     # Serialize with sorted keys and no whitespace differences
@@ -84,9 +101,12 @@ class Sync:
         self.infra_dao_slug = infra_dao_slug
         self.reset = reset
 
-        self.bc = BlockCacheClient(ALCHEMY_API_KEY)
+        self.pg = PostgreSQLClient(DATABASE_URL)
 
+        self.bc = BlockCacheClient(ALCHEMY_API_KEY)
+        
     def calc_cache_control(self, liveness):
+
         if liveness == 'live':
             if ENVIRONMENT == 'production':
                 max_age = 30 * SCHEDULER_INTERVAL_MINUTES # half a scheduler cycle
@@ -98,6 +118,9 @@ class Sync:
                 max_age = 365 * 24 * 60 * 60 # 1 year
             else:
                 max_age = 2 * 60 # 2 minutes
+
+        else:
+            raise Exception(f"Unknown liveness: {liveness}")
 
         return 'public, max-age=' + str(max_age)
         
@@ -162,7 +185,7 @@ class Sync:
             msg = f"content state is unchanged"
             raise SkipProposal(msg, proposal_id=proposal['id'])
 
-    async def read_existing_raw_proposal_hash_if_exists(self, proposal_id):
+    async def read_existing_raw_proposal_hash_if_exists(self, proposal_id, gcs_client: 'GCSClient'):
 
         blob_name = self.proposal_blob_name(proposal_id)
 
@@ -224,10 +247,12 @@ class EASSync(Sync):
 
     SOURCE = 'eas'
 
-    def __init__(self, infra_dao_slug, reset=False):
-        self.infra_dao_slug = infra_dao_slug
-        self.reset = reset
-    
+    async def read_votes(self, proposal_id):
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(f"""select * from atlas."OffChainVote" ocv where "proposalId" = '{proposal_id}';""")
+            return rows
+
     async def refresh_list(self, gcs_client: 'GCSClient'):
 
 
@@ -264,7 +289,7 @@ class EASSync(Sync):
                     continue
 
                 proposal_attestation = response.json()
-                pprint(proposal_attestation)
+                # pprint(proposal_attestation)
 
                 if proposal_attestation['attestation']['uid'] == '0x0000000000000000000000000000000000000000000000000000000000000000':
                     print(f"Failed to fetch proposal {proposals_uid}")
@@ -276,18 +301,45 @@ class EASSync(Sync):
                 del proposal['data']
                 proposal['resolver'] = proposal_attestation['schema']['resolver']
 
+                proposal_type = proposal['proposal_type']
+
                 proposal_id = proposal['id']
 
                 try:
-                    existing_proposal_hash = await self.read_existing_raw_proposal_hash_if_exists(proposal_id)
+                    existing_proposal_hash = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
                 except SkipProposal as e:
                     print(e)
                     continue
 
-                # TODO - get current state of votes here..
+                votes = await self.read_votes(proposal_id)
+
+                
+
+                if proposal_type in ('OPTIMISTIC', 'STANDARD'):
+
+                    outcome = defaultdict(lambda: defaultdict(int))
+
+                    for vote in votes:
+                        support = vote['vote']
+                        support = json.loads(support)
+                        for elem in support:
+                            outcome[vote['citizenCategory']][elem] += 1
+
+                elif proposal_type == 'APPROVAL': 
+
+                    outcome = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+                   
+                    for vote in votes:
+                        support = vote['vote']
+                        options, supports =json.loads(support)
+                        
+                        for option, support in zip(options, supports):
+                            outcome[vote['citizenCategory']][option][support] += 1
+
+                proposal['outcome'] = outcome
             
                 try:
-                    proposal_hash = self.check_proposal_hash(proposal, existing_proposal_hash)
+                    proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
                 except SkipProposal as e:
                     print(e)
                     continue
@@ -316,12 +368,10 @@ class EASSync(Sync):
 
                 anything_changed = True
 
-                self.overwrite_proposal(proposal, liveness, proposal_hash)
+                await self.overwrite_proposal(proposal, proposal_hash, liveness, gcs_client)
 
             if anything_changed:
-
                 await self.refresh_source_list(gcs_client)
-
                 await self.refresh_full_list(gcs_client)
 
 
@@ -344,7 +394,7 @@ class DaoNodeSync(Sync):
             print(proposal_id)
 
             try:
-                existing_proposal_hash = await self.read_existing_raw_proposal_hash_if_exists(proposal_id)
+                existing_proposal_hash = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
             except SkipProposal as e:
                 print(e)
                 continue
@@ -358,7 +408,7 @@ class DaoNodeSync(Sync):
                 continue
 
             try:
-                proposal_hash = self.check_proposal_hash(proposal, existing_proposal_hash)
+                proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
             except SkipProposal as e:
                 print(e)
                 continue
@@ -380,7 +430,7 @@ class DaoNodeSync(Sync):
             end_block = proposal['end_block']
             proposal['end_blocktime'] = self.get_timestamp(chain_id, end_block)
 
-            self.overwrite_proposal(proposal, liveness, proposal_hash)
+            await self.overwrite_proposal(proposal, proposal_hash, liveness, gcs_client)
 
         if anything_changed:
             await self.refresh_source_list(gcs_client)
@@ -393,7 +443,7 @@ if __name__ == "__main__":
     import asyncio
 
     
-    dns = DaoNodeSync('optimism')
+    dns = EASSync('optimism')
 
     gcs_client = GCSClient(GCS_BUCKET_NAME)
 

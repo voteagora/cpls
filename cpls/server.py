@@ -40,7 +40,22 @@ async def scheduled_job(infra_dao_slug):
             
         }
     )
-    print(f"Added scheduled job: {job_id} (interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
+    print(f"Added scheduled job: {job_id} [DAO Node] (interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
+
+    job_id = await job_queue.add_job(
+        job_type="scheduled",
+        payload={
+            "message": f"Scheduled job - {infra_dao_slug}",
+            "timestamp": datetime.now().isoformat(),
+            # "interval_minutes": SCHEDULER_INTERVAL_MINUTES,
+            "source": "eas",
+            "infra_dao_slug": infra_dao_slug
+            
+        }
+    )
+
+    print(f"Added scheduled job: {job_id} [EAS] (interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
+
 
 
 @asynccontextmanager
@@ -66,6 +81,7 @@ async def lifespan(app_instance: FastAPI):
         )
 
     scheduler.start()
+
     print(f"Scheduler configured to run every {SCHEDULER_INTERVAL_MINUTES} minutes")
 
     for infra_dao_slug in INFRA_DAO_SLUGS:

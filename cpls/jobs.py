@@ -6,7 +6,7 @@ from typing import Dict, Optional, List, TYPE_CHECKING
 from datetime import datetime
 from pydantic import BaseModel
 from enum import Enum
-from syncs import DaoNodeSync
+from syncs import DaoNodeSync, EASSync
 
 import requests as r
 
@@ -117,14 +117,20 @@ class JobQueue:
             gcs_client = GCSClient(GCS_BUCKET_NAME)
 
             await DaoNodeSync(infra_dao_slug).refresh_list(gcs_client)
+        
+        if job.payload['source'] == 'eas':
+
+            infra_dao_slug = job.payload['infra_dao_slug']
+
+            gcs_client = GCSClient(GCS_BUCKET_NAME)
+
+            await EASSync(infra_dao_slug).refresh_list(gcs_client)
 
         # Add your job processing logic here
-        print(f"Processing job {job.id} of type {job.type}")
+        print(f"Processing job {job.id} of type {job.type} for {job.payload['source']}")
 
         # Simulate work based on job type
-        if job.type == "scheduled":
-            await asyncio.sleep(10)  # Simulate scheduled job work
-        elif job.type == "external":
+        if job.type == "external":
             await asyncio.sleep(10)  # Simulate external job work
         else:
             await asyncio.sleep(10)  # Default job work
