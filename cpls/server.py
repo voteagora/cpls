@@ -16,6 +16,7 @@ import uvicorn
 from ui import generate_dashboard_html
 from gcs import GCSClient
 from jobs import JobQueue, JobRequest, JobStatus
+import time
 
 from config import ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHEDULER_INTERVAL_MINUTES
 
@@ -29,33 +30,30 @@ gcs_client = GCSClient(GCS_BUCKET_NAME)
 async def scheduled_job(infra_dao_slug):
     """Function to be called by the scheduler periodically"""
 
-    job_id = await job_queue.add_job(
-        job_type="scheduled",
-        payload={
-            "message": f"Scheduled job - {infra_dao_slug}",
-            "timestamp": datetime.now().isoformat(),
-            # "interval_minutes": SCHEDULER_INTERVAL_MINUTES,
-            "source": "dao_node",
-            "infra_dao_slug": infra_dao_slug
-            
-        }
-    )
-    print(f"Added scheduled job: {job_id} [DAO Node] (interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
+    if infra_dao_slug == 'optimism':
+        sources = ['dao_node', 'eas-atlas']
+    elif infra_dao_slug == 'jeffdao':
+        sources = ['eas-oodao']
+    elif infra_dao_slug in ('scroll', 'cyber', 'pguild'):
+        sources = ['dao_node']
+    else:
+        raise Exception(f"Unknown infra_dao_slug: {infra_dao_slug}")
 
-    job_id = await job_queue.add_job(
-        job_type="scheduled",
-        payload={
-            "message": f"Scheduled job - {infra_dao_slug}",
-            "timestamp": datetime.now().isoformat(),
-            # "interval_minutes": SCHEDULER_INTERVAL_MINUTES,
-            "source": "eas",
-            "infra_dao_slug": infra_dao_slug
-            
-        }
-    )
+    for source in sources:
+        job_id = await job_queue.add_job(
+            job_type="scheduled",
+            payload={
+                "message": f"Scheduled job - {infra_dao_slug}",
+                "timestamp": datetime.now().isoformat(),
+                # "interval_minutes": SCHEDULER_INTERVAL_MINUTES,
+                "source": source,
+                "infra_dao_slug": infra_dao_slug
+                
+            }
+        )
+        print(f"Added scheduled job: {job_id} [{source}] (interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
 
-    print(f"Added scheduled job: {job_id} [EAS] (interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
-
+        time.sleep(1)
 
 
 @asynccontextmanager
@@ -67,7 +65,7 @@ async def lifespan(app_instance: FastAPI):
     # Start job processor in background
     asyncio.create_task(job_queue.process_jobs(gcs_client))
 
-    INFRA_DAO_SLUGS = ["optimism", "cyber", "scroll"]
+    INFRA_DAO_SLUGS = ["optimism", "scroll", "cyber", "pguild", "jeffdao"]
 
     for infra_dao_slug in INFRA_DAO_SLUGS:
         # Configure scheduler to run at specified interval

@@ -10,12 +10,13 @@ import requests as req
 import asyncpg
 
 from gcs import GCSClient
-from config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY, DATABASE_URL
+from config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY, DATABASE_URL, BLOCKCACHE_URL
 
 import hashlib
 import json
 
 from pprint import pprint
+from eth_utils import to_checksum_address
 
 FIVE_MINUTES_IN_SECONDS = 5 * 60 * 60
 
@@ -39,6 +40,20 @@ def json_hash(obj, algo="sha256"):
     encoded = json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.new(algo, encoded).hexdigest()
 
+def to_eth_address(hex_string: str) -> str:
+    """
+    Convert a 32-byte hex string literal (e.g. 0x0000...a622279f76ddbed4f2cc986c09244262dba8f4ba)
+    to a valid Ethereum address (EIP-55 checksum format).
+    """
+    # Strip 0x prefix if present
+    hex_str = hex_string.lower().removeprefix("0x")
+
+    # The address is always the last 20 bytes (40 hex chars)
+    address_hex = hex_str[-40:]
+
+    # Convert to checksum address
+    return to_checksum_address("0x" + address_hex)
+
 class SkipProposal(Exception):
     def __init__(self, reason, proposal_id):
         self.reason = reason
@@ -51,7 +66,8 @@ class BlockNotFound(Exception):
     pass
 
 class BlockCacheClient:
-    def __init__(self, alchemy_api_key):
+    def __init__(self, base_url, alchemy_api_key):
+        self.base_url = base_url
         self.alchemy_api_key = alchemy_api_key
 
     def headers(self):
@@ -76,7 +92,7 @@ class BlockCacheClient:
 
         headers = self.headers()
 
-        resp = req.get(f"https://blacache-production.up.railway.app/exact_blocktime/{chain_id}/{block_number}", headers=headers).json()
+        resp = req.get(self.base_url + f"/exact_blocktime/{chain_id}/{block_number}", headers=headers).json()
         
         return self.return_ts(resp)
     
@@ -84,7 +100,7 @@ class BlockCacheClient:
 
         headers = self.headers()
 
-        resp = req.get(f"https://blacache-production.up.railway.app/estimated_blocktime/{chain_id}/{block_number}", headers=headers).json()
+        resp = req.get(self.base_url + f"/estimated_blocktime/{chain_id}/{block_number}", headers=headers).json()
 
         return self.return_ts(resp)
     
@@ -94,6 +110,28 @@ class BlockCacheClient:
             return self.get_exact_blocktime(chain_id, block_number)
         except BlockNotFound:    
             return self.get_estimated_blocktime(chain_id, block_number)
+    
+    def last_block_before_timestamp(self, chain_id, unixts):
+
+        headers = self.headers()
+
+        url = self.base_url + f"/last_block_before_timestamp/{chain_id}/{unixts}"
+        resp = req.get(url, headers=headers)
+        
+        data = resp.json()
+
+        return data['block_number']
+
+    def get_ens(self, address):
+
+        headers = self.headers()
+
+        url = self.base_url + f"/ens/{address}"
+        resp = req.get(url, headers=headers)
+        
+        data = resp.json()
+
+        return data
 
 class Sync:
     def __init__(self, infra_dao_slug, reset=False):
@@ -103,8 +141,7 @@ class Sync:
 
         self.pg = PostgreSQLClient(DATABASE_URL)
 
-        self.bc = BlockCacheClient(ALCHEMY_API_KEY)
-        
+        self.bc = BlockCacheClient(BLOCKCACHE_URL, ALCHEMY_API_KEY)
     def calc_cache_control(self, liveness):
 
         if liveness == 'live':
@@ -227,7 +264,7 @@ class Sync:
 
         data_eng_properties = {
             'liveness': liveness,
-            'source' : 'eas',
+            'source' : self.SOURCE,
             'hash' : proposal_hash
         }
 
@@ -243,9 +280,9 @@ class Sync:
         await gcs_client.upload_dict(proposal, blob_name, metadata=metadata, cache_control=cache_contr)
 
 
-class EASSync(Sync):
+class EASAtlasSync(Sync):
 
-    SOURCE = 'eas'
+    SOURCE = 'eas-atlas'
 
     async def read_votes(self, proposal_id):
         pool = await self.pg.connect()
@@ -374,6 +411,127 @@ class EASSync(Sync):
                 await self.refresh_source_list(gcs_client)
                 await self.refresh_full_list(gcs_client)
 
+class EASOoDaoSync(Sync):
+
+    SOURCE = 'eas-oodao'
+
+    async def read_votes(self, proposal_id):
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(f"""select * from auazure."eas_attestations_v2" ocv WHERE topic3 = '0xffcc8fe77f55448bee5f0e24844ee76f83c3c2718dcf8a75de750cf4797ad0bc' and decoded_attestation->'proposal_id' = '{proposal_id}';""")
+            return rows
+    
+    async def read_proposals(self):
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(f"""select 
+                                                topic1 as dao_id,
+                                                data as uid,
+                                                topic2 as author,
+                                                chain_id,
+                                                decoded_attestation->>'tags' as tags,
+                                                decoded_attestation->'endts' as endts,
+                                                decoded_attestation->>'title' as title,
+                                                decoded_attestation->'startts' as startts,
+                                                decoded_attestation->>'description' as description,
+                                                decoded_attestation->'proposal_id' as proposal_id
+                                                from auazure."eas_attestations_v2" ocp WHERE topic3 = '0x12e8600c9bb57b5b436fa09735cfc63e95098552122001c465b610261eea8a93';""")
+            return rows
+
+    async def refresh_list(self, gcs_client: 'GCSClient'):
+
+
+        ######################################
+        # Step 1 - Get a list of recent-ish proposals.  Think either the "full list of any proposal ever" OR "just stuff that may or may not be ready to archive"
+        #
+
+        proposals = await self.read_proposals()
+
+        anything_changed = False
+
+        for proposal_meta in proposals:
+
+            proposal = dict(proposal_meta)
+
+            proposal_id = proposal_meta['proposal_id']
+
+            proposal['id'] = proposal_id
+
+            proposal_type = proposal.get('proposal_type', None)
+
+            if proposal_type is None:
+                proposal_type_name = 'UNSET'
+            else:
+                proposal_type_name = proposal_type.get('name')
+            
+            proposal['author'] = to_eth_address(proposal_meta['author'])
+            proposal['author_ens'] = self.bc.get_ens(proposal['author'])
+
+            try:
+                existing_proposal_hash = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
+            except SkipProposal as e:
+                print(e)
+                continue
+
+            votes = await self.read_votes(proposal_id)
+            
+            if proposal_type_name in ('UNSET', 'OPTIMISTIC', 'STANDARD'):
+
+                outcome = defaultdict(lambda: defaultdict(int))
+
+                for vote in votes:
+                    vote = json.loads(vote['decoded_attestation']) #vote['decoded_attestation']
+                    print(vote)
+                    choice = vote['choice']
+                    outcome['token-holders'][choice] += 1 * 1e18 # TODO Pull in VP
+
+            elif proposal_type == 'APPROVAL': 
+                raise NotImplementedError("Approval Types are Not implemented yet.")
+
+            proposal['outcome'] = outcome
+
+            print(proposal)
+        
+            try:
+                proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
+            except SkipProposal as e:
+                print(e)
+                continue
+
+            startts = int(proposal_meta['startts'])
+            endts = int(proposal_meta['endts'])
+
+            curts = int(time.time())
+
+            if curts >= startts:
+                start_block = self.bc.last_block_before_timestamp(proposal['chain_id'], startts)
+            else:
+                start_block = -1
+            
+            if curts >= endts:
+                end_block = self.bc.last_block_before_timestamp(proposal['chain_id'], endts)
+            else:
+                end_block = -1
+
+            proposal['start_blocktime'] = endts
+            proposal['end_blocktime'] = endts
+
+            proposal['start_block'] = start_block
+            proposal['end_block'] = end_block
+
+            liveness = 'live'
+
+            if curts > (endts + FIVE_MINUTES_IN_SECONDS):
+                liveness = 'archived'
+
+            anything_changed = True
+
+            await self.overwrite_proposal(proposal, proposal_hash, liveness, gcs_client)
+
+        if anything_changed:
+            await self.refresh_source_list(gcs_client)
+            await self.refresh_full_list(gcs_client)
+
 
 class DaoNodeSync(Sync):
 
@@ -443,7 +601,7 @@ if __name__ == "__main__":
     import asyncio
 
     
-    dns = EASSync('optimism')
+    dns = EASOoDaoSync('jeffdao')
 
     gcs_client = GCSClient(GCS_BUCKET_NAME)
 
