@@ -17,6 +17,7 @@ import json
 
 from pprint import pprint
 from eth_utils import to_checksum_address
+from title_processor import get_title_from_proposal_description
 
 FIVE_MINUTES_IN_SECONDS = 5 * 60 * 60
 
@@ -122,16 +123,19 @@ class BlockCacheClient:
 
         return data['block_number']
 
-    def get_ens(self, address):
+    def get_ens(self, address, chain_id=1):
 
         headers = self.headers()
 
-        url = self.base_url + f"/ens/{address}"
+        url = self.base_url + f"/ens/{chain_id}/{address}"
         resp = req.get(url, headers=headers)
         
-        data = resp.json()
 
-        return data
+        if resp.status_code == 404:
+            return None
+        else:
+            data = resp.json()
+            return data
 
 class Sync:
     def __init__(self, infra_dao_slug, reset=False):
@@ -326,7 +330,6 @@ class EASAtlasSync(Sync):
                     continue
 
                 proposal_attestation = response.json()
-                # pprint(proposal_attestation)
 
                 if proposal_attestation['attestation']['uid'] == '0x0000000000000000000000000000000000000000000000000000000000000000':
                     print(f"Failed to fetch proposal {proposals_uid}")
@@ -340,6 +343,8 @@ class EASAtlasSync(Sync):
 
                 proposal_type = proposal['proposal_type']
 
+                proposal['id'] = str(proposal['id'])
+
                 proposal_id = proposal['id']
 
                 try:
@@ -347,6 +352,9 @@ class EASAtlasSync(Sync):
                 except SkipProposal as e:
                     print(e)
                     continue
+
+                proposal['title'] = get_title_from_proposal_description(proposal['description'])
+                proposal['proposer_ens'] = self.bc.get_ens(proposal['proposer'])
 
                 votes = await self.read_votes(proposal_id)
 
@@ -418,13 +426,16 @@ class EASOoDaoSync(Sync):
     async def read_votes(self, proposal_id):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            rows = await connection.fetch(f"""select * from auazure."eas_attestations_v2" ocv WHERE topic3 = '0xffcc8fe77f55448bee5f0e24844ee76f83c3c2718dcf8a75de750cf4797ad0bc' and decoded_attestation->'proposal_id' = '{proposal_id}';""")
+            qry = f"""select * from auazure."eas_attestations_v2" ocv WHERE topic3 in ('0xffcc8fe77f55448bee5f0e24844ee76f83c3c2718dcf8a75de750cf4797ad0bc', '0x04cb5678af613212e584cf8d117ee3fcd038a9ab657ecf0c596cabe1e6ebd9f0') and decoded_attestation->'proposal_id' = '{proposal_id}';"""
+            print(qry)
+            rows = await connection.fetch(qry)
             return rows
     
     async def read_proposals(self):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
             rows = await connection.fetch(f"""select 
+                                                transaction_hash,
                                                 topic1 as dao_id,
                                                 data as uid,
                                                 topic2 as author,
@@ -464,8 +475,9 @@ class EASOoDaoSync(Sync):
             else:
                 proposal_type_name = proposal_type.get('name')
             
-            proposal['author'] = to_eth_address(proposal_meta['author'])
-            proposal['author_ens'] = self.bc.get_ens(proposal['author'])
+            proposal['proposer'] = to_eth_address(proposal_meta['author'])
+            proposal['proposer_ens'] = self.bc.get_ens(proposal['proposer'])
+            del proposal['author']
 
             try:
                 existing_proposal_hash = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
@@ -483,14 +495,16 @@ class EASOoDaoSync(Sync):
                     vote = json.loads(vote['decoded_attestation']) #vote['decoded_attestation']
                     print(vote)
                     choice = vote['choice']
-                    outcome['token-holders'][choice] += 1 * 1e18 # TODO Pull in VP
+                    outcome['token-holders'][choice] += 1 * 1000000000000000000 # TODO, bring in actual VP
+            
+                for key in outcome['token-holders'].keys():
+                    outcome['token-holders'][key] = str(outcome['token-holders'][key])
 
             elif proposal_type == 'APPROVAL': 
                 raise NotImplementedError("Approval Types are Not implemented yet.")
 
             proposal['outcome'] = outcome
-
-            print(proposal)
+            proposal['tags'] = proposal['tags'].split(',')
         
             try:
                 proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
@@ -518,6 +532,10 @@ class EASOoDaoSync(Sync):
 
             proposal['start_block'] = start_block
             proposal['end_block'] = end_block
+
+            del proposal['startts']
+            del proposal['endts']
+            del proposal['proposal_id']
 
             liveness = 'live'
 
@@ -570,6 +588,8 @@ class DaoNodeSync(Sync):
             except SkipProposal as e:
                 print(e)
                 continue
+
+            proposal['title'] = get_title_from_proposal_description(proposal['description'])
         
             liveness = 'live'
             if 'execute_event' in proposal or 'cancel_event' in proposal:
@@ -585,8 +605,19 @@ class DaoNodeSync(Sync):
             start_blocktime = self.get_timestamp(chain_id, start_block) 
             proposal['start_blocktime'] = start_blocktime
 
+            proposal['proposer_ens'] = self.bc.get_ens(proposal['proposer'])
+            
             end_block = proposal['end_block']
             proposal['end_blocktime'] = self.get_timestamp(chain_id, end_block)
+
+            if 'cancel_event' in proposal:
+                proposal['cancel_event']['timestamp'] = self.get_timestamp(chain_id, proposal['cancel_event']['block_number'])
+
+            if 'execute_event' in proposal:
+                proposal['execute_event']['timestamp'] = self.get_timestamp(chain_id, proposal['execute_event']['block_number'])
+
+            if 'queue_event' in proposal:
+                proposal['queue_event']['timestamp'] = self.get_timestamp(chain_id, proposal['queue_event']['block_number'])
 
             await self.overwrite_proposal(proposal, proposal_hash, liveness, gcs_client)
 
@@ -600,8 +631,9 @@ if __name__ == "__main__":
 
     import asyncio
 
-    
-    dns = EASOoDaoSync('jeffdao')
+    # dns = EASOoDaoSync('jeffdao', reset=True)
+    # dns = EASAtlasSync('optimism', reset=True)
+    dns = DaoNodeSync('cyber', reset=True)
 
     gcs_client = GCSClient(GCS_BUCKET_NAME)
 

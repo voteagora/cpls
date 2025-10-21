@@ -156,12 +156,14 @@ Fields unique to 'dao_node':
   - cancel_event.block_number: str
   - cancel_event.id: str
   - cancel_event.log_index: int
+  - cancel_event.timestamp: int
   - cancel_event.transaction_index: int
   - decoded_proposal_data: list[list[bool, int]], list[list[int, str], list[list[int, list[empty], str]]], list[list[int, str], list[list[int, list[int], list[str], str]]], list[list[int, str], list[list[list[empty], str]]], list[list[int, str], list[list[list[int], list[str], str]]]
   - execute_event: dict
   - execute_event.block_number: str
   - execute_event.id: str
   - execute_event.log_index: int
+  - execute_event.timestamp: int
   - execute_event.transaction_index: int
   - log_index: int
   - proposal_data: str
@@ -170,6 +172,7 @@ Fields unique to 'dao_node':
   - queue_event.eta: int
   - queue_event.id: str
   - queue_event.log_index: int
+  - queue_event.timestamp: int
   - queue_event.transaction_index: int
   - signatures: list[str]
   - targets: list[str]
@@ -299,23 +302,18 @@ Fields unique to 'eas-atlas':
   - time: int
 
 Fields unique to 'eas-oodao':
-  - author: str
-  - author_ens: dict
-  - author_ens.detail: str
   - dao_id: str
-  - endts: str
   - outcome.token-holders: dict
-  - outcome.token-holders.1: float
-  - proposal_id: str
-  - startts: str
-  - tags: str
-  - title: str
+  - outcome.token-holders.0: str
+  - outcome.token-holders.1: str
+  - tags: list[str]
+  - transaction_hash: str
 
 --------------------------------------------------------------------------------
 FIELDS COMMON TO ALL SOURCES
 --------------------------------------------------------------------------------
 
-8 field(s) present in all sources:
+11 field(s) present in all sources:
 
   data_eng_properties:
     [dao_node]: dict
@@ -344,8 +342,18 @@ FIELDS COMMON TO ALL SOURCES
 
   id:
     [dao_node]: str
-    [eas-atlas]: int
+    [eas-atlas]: str
     [eas-oodao]: str
+
+  proposer:
+    [dao_node]: str
+    [eas-atlas]: str
+    [eas-oodao]: str
+
+  proposer_ens:
+    [dao_node]: null, str
+    [eas-atlas]: null
+    [eas-oodao]: null
 
   start_block:
     [dao_node]: int
@@ -356,4 +364,9 @@ FIELDS COMMON TO ALL SOURCES
     [dao_node]: int
     [eas-atlas]: int
     [eas-oodao]: int
+
+  title:
+    [dao_node]: str
+    [eas-atlas]: str
+    [eas-oodao]: str
 ```

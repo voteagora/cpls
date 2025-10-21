@@ -2,6 +2,8 @@ from google.cloud import storage
 from datetime import datetime
 import json
 import gzip
+import os
+from pathlib import Path
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from config import ENVIRONMENT
@@ -11,10 +13,17 @@ if TYPE_CHECKING:
 
 
 class GCSClient:
-    def __init__(self, bucket_name: str):
+    def __init__(self, bucket_name: str, write_local_copies: bool = False, local_copy_dir: str = "/Users/jm/code/cpls/data"):
         self.bucket_name = bucket_name
         self.client = None
         self.bucket = None
+        self.write_local_copies = write_local_copies
+        self.local_copy_dir = local_copy_dir
+
+        # Create local copy directory if needed
+        if self.write_local_copies:
+            Path(self.local_copy_dir).mkdir(parents=True, exist_ok=True)
+            print(f"Local copies will be written to: {self.local_copy_dir}")
 
         # Initialize GCS client if credentials are available
         try:
@@ -30,6 +39,35 @@ class GCSClient:
     async def list_blobs(self, prefix):
         blobs = self.bucket.list_blobs(prefix=prefix)
         return blobs
+
+    def _write_local_copy(self, blob_name: str, data: bytes, is_text: bool = False):
+        """
+        Write a local copy of the blob to disk
+
+        Args:
+            blob_name: The GCS blob name (used to create the local file path)
+            data: The data to write (bytes)
+            is_text: If True, write as text file; if False, write as binary
+        """
+        if not self.write_local_copies:
+            return
+
+        try:
+            # Create full local path
+            local_path = Path(self.local_copy_dir) / blob_name
+
+            # Create parent directories if needed
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Write the file
+            if is_text:
+                local_path.write_text(data.decode() if isinstance(data, bytes) else data)
+            else:
+                local_path.write_bytes(data)
+
+            print(f"Wrote local copy to: {local_path}")
+        except Exception as e:
+            print(f"Warning: Failed to write local copy of {blob_name}: {e}")
 
     async def upload_dict(self, data: Dict, blob_name: str, cache_control: Optional[str] = None, metadata: Optional[Dict[str, str]] = None) -> bool:
         """
@@ -74,6 +112,9 @@ class GCSClient:
             compressed_blob.upload_from_string(compressed_data, content_type="application/gzip")
             # print(f"Uploaded compressed data to GCS: {compressed_blob_name}")
 
+            # Write local copy of compressed version
+            self._write_local_copy(compressed_blob_name, compressed_data, is_text=False)
+
             # Upload uncompressed version in development mode
             if ENVIRONMENT == "development":
                 uncompressed_blob = self.bucket.blob(blob_name)
@@ -88,6 +129,9 @@ class GCSClient:
 
                 uncompressed_blob.upload_from_string(json_data, content_type="application/json")
                 # print(f"Uploaded uncompressed data to GCS (dev): {blob_name}")
+
+                # Write local copy of uncompressed version
+                self._write_local_copy(blob_name, json_data.encode(), is_text=True)
 
             return True
 
@@ -180,6 +224,9 @@ class GCSClient:
             compressed_blob.upload_from_string(compressed_data, content_type="application/gzip")
             print(f"Uploaded compressed NDJSON to GCS: {compressed_blob_name}")
 
+            # Write local copy of compressed version
+            self._write_local_copy(compressed_blob_name, compressed_data, is_text=False)
+
             # Upload uncompressed version in development mode
             if ENVIRONMENT == "development":
                 uncompressed_blob = self.bucket.blob(blob_name)
@@ -194,6 +241,9 @@ class GCSClient:
 
                 uncompressed_blob.upload_from_string(ndjson_data, content_type="application/x-ndjson")
                 print(f"Uploaded uncompressed NDJSON to GCS (dev): {blob_name}")
+
+                # Write local copy of uncompressed version
+                self._write_local_copy(blob_name, ndjson_data.encode(), is_text=True)
 
             return True
 
