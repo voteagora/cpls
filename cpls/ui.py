@@ -33,6 +33,8 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
                 <button class="copy-btn" onclick="copyToClipboard('{job.id}')" title="Copy full ID">📋</button>
             </td>
             <td>{job.type}</td>
+            <td>{job.payload.get('infra_dao_slug', '-')}</td>
+            <td>{job.payload.get('source', '-')}</td>
             <td style="color: {status_color}; font-weight: bold;">{job.status}</td>
             <td>{job.created_at.strftime('%Y-%m-%d %H:%M:%S')}</td>
             <td>{job.started_at.strftime('%H:%M:%S') if job.started_at else '-'}</td>
@@ -199,6 +201,8 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
                 <tr>
                     <th>Job ID</th>
                     <th>Type</th>
+                    <th>Infra DAO Slug</th>
+                    <th>Source</th>
                     <th>Status</th>
                     <th>Created</th>
                     <th>Started</th>
@@ -207,7 +211,7 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
                 </tr>
             </thead>
             <tbody>
-                {job_rows if job_rows else '<tr><td colspan="7" style="text-align: center;">No jobs yet</td></tr>'}
+                {job_rows if job_rows else '<tr><td colspan="9" style="text-align: center;">No jobs yet</td></tr>'}
             </tbody>
         </table>
     </body>
