@@ -25,9 +25,14 @@ class GCSClient:
             Path(self.local_copy_dir).mkdir(parents=True, exist_ok=True)
             print(f"Local copies will be written to: {self.local_copy_dir}")
 
+        GOOGLE_CREDENTIALS = os.getenv("GOOGLE_CREDENTIALS", None)
+        if GOOGLE_CREDENTIALS:
+            credentials_info = json.loads(GOOGLE_CREDENTIALS)
+            self.client = storage.Client.from_service_account_info(credentials_info)
+        else:
+            self.client = storage.Client()
         # Initialize GCS client if credentials are available
         try:
-            self.client = storage.Client()
             self.bucket = self.client.bucket(bucket_name)
         except Exception as e:
             print(f"Warning: GCS client not initialized: {e}")
