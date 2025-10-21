@@ -204,11 +204,7 @@ class Sync:
 
             proposal_list.extend(data)
         
-        try:
-            proposal_list.sort(key=lambda x: int(x['end_blocktime']), reverse=True)
-        except:
-            for prop in proposal_list:
-                print(prop['id'], prop['end_blocktime'])
+        proposal_list.sort(key=lambda x: int(x['end_blocktime']), reverse=True)
 
         await gcs_client.upload_ndjson(proposal_list, f"data/{self.infra_dao_slug}/proposal_list.full.ndjson")
 
@@ -319,8 +315,6 @@ class EASAtlasSync(Sync):
         for proposals_uid in known_create_attestations[self.infra_dao_slug]:
 
             for chain_id in [10, 1]:
-
-                print(proposals_uid)
 
                 url = f"https://blacache-production.up.railway.app/decoded_eas/{chain_id}/attestation/{proposals_uid}"
                 response = req.get(url, headers=headers)

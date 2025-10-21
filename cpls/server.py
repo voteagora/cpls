@@ -83,9 +83,8 @@ async def lifespan(app_instance: FastAPI):
     print(f"Scheduler configured to run every {SCHEDULER_INTERVAL_MINUTES} minutes")
 
     for infra_dao_slug in INFRA_DAO_SLUGS:
-      # Run first scheduled job immediately
+        # Run first scheduled job immediately
         await scheduled_job(infra_dao_slug)
-
 
     print("Server started: Job processor and scheduler are running")
 
