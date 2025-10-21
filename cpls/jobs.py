@@ -6,12 +6,12 @@ from typing import Dict, Optional, List, TYPE_CHECKING
 from datetime import datetime
 from pydantic import BaseModel
 from enum import Enum
-from syncs import DaoNodeSync, EASAtlasSync, EASOoDaoSync
+from .syncs import DaoNodeSync, EASAtlasSync, EASOoDaoSync
 
 import requests as r
 
-from gcs import GCSClient
-from config import GCS_BUCKET_NAME  
+from .gcs import GCSClient
+from .config import GCS_BUCKET_NAME  
 
 class JobStatus(str, Enum):
     PENDING = "pending"

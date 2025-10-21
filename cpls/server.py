@@ -13,12 +13,12 @@ from fastapi.responses import HTMLResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import uvicorn
 
-from ui import generate_dashboard_html
-from gcs import GCSClient
-from jobs import JobQueue, JobRequest, JobStatus
+from .ui import generate_dashboard_html
+from .gcs import GCSClient
+from .jobs import JobQueue, JobRequest, JobStatus
 import time
 
-from config import ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHEDULER_INTERVAL_MINUTES
+from .config import ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHEDULER_INTERVAL_MINUTES
 
 
 # Initialize components

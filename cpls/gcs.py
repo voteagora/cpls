@@ -6,10 +6,10 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, TYPE_CHECKING
 
-from config import ENVIRONMENT
+from .config import ENVIRONMENT
 
 if TYPE_CHECKING:
-    from jobs import Job
+    from .jobs import Job
 
 
 class GCSClient:

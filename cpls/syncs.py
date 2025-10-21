@@ -9,15 +9,15 @@ import time
 import requests as req
 import asyncpg
 
-from gcs import GCSClient
-from config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY, DATABASE_URL, BLOCKCACHE_URL
+from .gcs import GCSClient
+from .config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY, DATABASE_URL, BLOCKCACHE_URL
 
 import hashlib
 import json
 
 from pprint import pprint
 from eth_utils import to_checksum_address
-from title_processor import get_title_from_proposal_description
+from .title_processor import get_title_from_proposal_description
 
 FIVE_MINUTES_IN_SECONDS = 5 * 60 * 60
 
