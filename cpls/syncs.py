@@ -561,7 +561,6 @@ class DaoNodeSync(Sync):
 
         for proposal_info in proposals:
             proposal_id = proposal_info['id']
-            print(proposal_id)
 
             try:
                 existing_proposal_hash = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
