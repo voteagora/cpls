@@ -16,6 +16,14 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
     Returns:
         HTML string for the dashboard
     """
+    # Extract unique DAO slugs for filter
+    dao_slugs = set()
+    for job in jobs:
+        slug = job.payload.get('infra_dao_slug')
+        if slug:
+            dao_slugs.add(slug)
+    dao_slugs = sorted(dao_slugs)
+
     # Generate HTML for job list
     job_rows = ""
     for job in jobs:
@@ -96,17 +104,26 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
             tr:hover {{
                 background-color: #f9f9f9;
             }}
-            .refresh-btn {{
-                background-color: #4169E1;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 4px;
-                cursor: pointer;
+            .filter-container {{
                 margin-bottom: 20px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
             }}
-            .refresh-btn:hover {{
-                background-color: #3151B1;
+            .filter-label {{
+                font-weight: bold;
+                color: #333;
+            }}
+            .filter-select {{
+                padding: 8px 12px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background-color: white;
+                cursor: pointer;
+                font-size: 14px;
+            }}
+            .filter-select:hover {{
+                border-color: #4169E1;
             }}
             .copy-btn {{
                 background-color: transparent;
@@ -132,13 +149,6 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
             }}
         </style>
         <script>
-            function refreshPage() {{
-                location.reload();
-            }}
-
-            // Auto-refresh every 5 seconds
-            setInterval(refreshPage, 5000);
-
             function copyToClipboard(text) {{
                 // Create a temporary textarea element
                 const textarea = document.createElement('textarea');
@@ -163,6 +173,28 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
                     event.target.textContent = '📋';
                     event.target.classList.remove('copied');
                 }}, 2000);
+            }}
+
+            function filterByDao() {{
+                const filterValue = document.getElementById('dao-filter').value;
+                const table = document.querySelector('table tbody');
+                const rows = table.querySelectorAll('tr');
+
+                rows.forEach(row => {{
+                    // Skip the "No jobs yet" row
+                    if (row.cells.length < 9) {{
+                        return;
+                    }}
+
+                    const daoSlugCell = row.cells[2]; // Infra DAO Slug column (0-indexed)
+                    const daoSlug = daoSlugCell.textContent.trim();
+
+                    if (filterValue === 'all' || daoSlug === filterValue) {{
+                        row.style.display = '';
+                    }} else {{
+                        row.style.display = 'none';
+                    }}
+                }});
             }}
         </script>
     </head>
@@ -192,8 +224,13 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
             </div>
         </div>
 
-        <button class="refresh-btn" onclick="refreshPage()">Refresh Now</button>
-        <small style="color: #666;">(Auto-refreshes every 5 seconds)</small>
+        <div class="filter-container">
+            <span class="filter-label">Filter by DAO:</span>
+            <select id="dao-filter" class="filter-select" onchange="filterByDao()">
+                <option value="all">All DAOs</option>
+                {''.join(f'<option value="{slug}">{slug}</option>' for slug in dao_slugs)}
+            </select>
+        </div>
 
         <h2>Job List</h2>
         <table>

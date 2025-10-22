@@ -62,7 +62,7 @@ async def lifespan(app_instance: FastAPI):
     # Start job processor in background
     asyncio.create_task(job_queue.process_jobs(gcs_client))
 
-    INFRA_DAO_SLUGS = ["optimism", "scroll", "cyber", "pguild", "jeffdao"]
+    INFRA_DAO_SLUGS = ["scroll", "cyber", "pguild", "jeffdao"]
 
     for infra_dao_slug in INFRA_DAO_SLUGS:
         # Configure scheduler to run at specified interval

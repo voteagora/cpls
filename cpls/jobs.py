@@ -88,44 +88,49 @@ class JobQueue:
                 dao_lock = self._get_dao_lock(dao_slug)
 
                 print(f"🔧 Worker {worker_id} attempting to acquire lock for DAO {dao_slug}")
-                async with dao_lock:
-                    print(f"✅ Worker {worker_id} processing job {job.id} for DAO {dao_slug} (LOCK ACQUIRED)")
+                try:
+                    async with dao_lock:
+                        print(f"✅ Worker {worker_id} processing job {job.id} for DAO {dao_slug} (LOCK ACQUIRED)")
 
-                    # Update current_job for backward compatibility (shows last job started)
-                    self.current_job = job
-                    job.status = JobStatus.PROCESSING
-                    job.started_at = datetime.now()
+                        # Update current_job for backward compatibility (shows last job started)
+                        self.current_job = job
+                        job.status = JobStatus.PROCESSING
+                        job.started_at = datetime.now()
 
-                    try:
-                        await self._execute_job(job)
-                        job.status = JobStatus.COMPLETED
-                    except Exception as e:
-                        job.status = JobStatus.FAILED
-                        # Capture the full error message and traceback
-                        error_message = str(e)
-                        full_traceback = traceback.format_exc()
+                        try:
+                            await self._execute_job(job)
+                            job.status = JobStatus.COMPLETED
+                        except Exception as e:
+                            job.status = JobStatus.FAILED
+                            # Capture the full traceback
+                            full_traceback = traceback.format_exc()
 
-                        # Store error in job
-                        job.error = error_message
+                            # Store full traceback in job
+                            job.error = full_traceback
 
-                        # Print detailed error information
-                        print(f"\n{'='*60}")
-                        print(f"❌ JOB FAILED: {job.id} (Worker {worker_id})")
-                        print(f"Job Type: {job.type}")
-                        print(f"DAO: {dao_slug}")
-                        print(f"Error: {error_message}")
-                        print(f"{'='*60}")
-                        print("Full Traceback:")
-                        print(full_traceback)
-                        print(f"{'='*60}\n")
-                    finally:
-                        job.completed_at = datetime.now()
+                            # Print detailed error information
+                            print(f"\n{'='*60}")
+                            print(f"❌ JOB FAILED: {job.id} (Worker {worker_id})")
+                            print(f"Job Type: {job.type}")
+                            print(f"DAO: {dao_slug}")
+                            print(f"{'='*60}")
+                            print("Full Traceback:")
+                            print(full_traceback)
+                            print(f"{'='*60}\n")
+                        finally:
+                            job.completed_at = datetime.now()
 
-                        # Upload result to GCS
-                        await gcs_client.safe_upload_job_result(job)
+                            # Upload result to GCS - wrap in try-except to prevent blocking
+                            try:
+                                await gcs_client.safe_upload_job_result(job)
+                            except Exception as upload_error:
+                                print(f"⚠️ Failed to upload job result to GCS for job {job.id}: {upload_error}")
+                                print(traceback.format_exc())
 
-                        self.queue.task_done()
-                        print(f"🔓 Worker {worker_id} finished job {job.id} for DAO {dao_slug} (LOCK RELEASED)")
+                            print(f"🔓 Worker {worker_id} finished job {job.id} for DAO {dao_slug} (LOCK RELEASED)")
+                finally:
+                    # Always call task_done, even if lock acquisition or job processing failed
+                    self.queue.task_done()
 
             except asyncio.CancelledError:
                 print(f"Worker {worker_id} cancelled")
