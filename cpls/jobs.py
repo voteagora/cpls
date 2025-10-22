@@ -107,32 +107,21 @@ class JobQueue:
     async def _execute_job(self, job: Job):
         """Execute the actual job logic"""
 
-
         print(job.payload)
 
-        if job.payload['source'] == 'dao_node':
+        for source in job.payload['sources']:
+
             infra_dao_slug = job.payload['infra_dao_slug']
             gcs_client = GCSClient(GCS_BUCKET_NAME)
-            await DaoNodeSync(infra_dao_slug).refresh_list(gcs_client)
-        
-        elif job.payload['source'] == 'eas-atlas':
-            infra_dao_slug = job.payload['infra_dao_slug']
-            gcs_client = GCSClient(GCS_BUCKET_NAME)
-            await EASAtlasSync(infra_dao_slug).refresh_list(gcs_client)
-
-        elif job.payload['source'] == 'eas-oodao':
-            infra_dao_slug = job.payload['infra_dao_slug']
-            gcs_client = GCSClient(GCS_BUCKET_NAME)
-            await EASOoDaoSync(infra_dao_slug).refresh_list(gcs_client)
-
-        # Add your job processing logic here
-        print(f"Processing job {job.id} of type {job.type} for {job.payload['source']}")
-
-        # Simulate work based on job type
-        if job.type == "external":
-            await asyncio.sleep(10)  # Simulate external job work
-        else:
-            await asyncio.sleep(10)  # Default job work
+            
+            if source == 'dao_node':
+                await DaoNodeSync(infra_dao_slug).refresh_list(gcs_client)
+            elif source == 'eas-atlas':
+                await EASAtlasSync(infra_dao_slug).refresh_list(gcs_client)
+            elif source == 'eas-oodao':
+                await EASOoDaoSync(infra_dao_slug).refresh_list(gcs_client)
+            else:
+                raise Exception(f"Unknown source: {source}")
 
         print(f"Completed job {job.id}")
 

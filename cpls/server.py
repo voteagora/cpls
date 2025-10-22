@@ -39,21 +39,18 @@ async def scheduled_job(infra_dao_slug):
     else:
         raise Exception(f"Unknown infra_dao_slug: {infra_dao_slug}")
 
-    for source in sources:
-        job_id = await job_queue.add_job(
-            job_type="scheduled",
-            payload={
-                "message": f"Scheduled job - {infra_dao_slug}",
-                "timestamp": datetime.now().isoformat(),
-                # "interval_minutes": SCHEDULER_INTERVAL_MINUTES,
-                "source": source,
-                "infra_dao_slug": infra_dao_slug
-                
-            }
-        )
-        print(f"Added scheduled job: {job_id} [{source}] (interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
-
-        time.sleep(1)
+    job_id = await job_queue.add_job(
+        job_type="scheduled",
+        payload={
+            "message": f"Scheduled job - {infra_dao_slug}",
+            "timestamp": datetime.now().isoformat(),
+            # "interval_minutes": SCHEDULER_INTERVAL_MINUTES,
+            "infra_dao_slug": infra_dao_slug,
+            "sources": sources
+            
+        }
+    )
+    print(f"Added scheduled job: {job_id} for infra_dao_slug: {infra_dao_slug} w/ sources: {sources} @ interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
 
 
 @asynccontextmanager
@@ -72,7 +69,7 @@ async def lifespan(app_instance: FastAPI):
         scheduler.add_job(
             scheduled_job,
             'interval',
-            minutes=1,
+            minutes=SCHEDULER_INTERVAL_MINUTES,
             id='scheduled_job-' + infra_dao_slug,
             max_instances=1,
             kwargs = {'infra_dao_slug': infra_dao_slug}
@@ -82,9 +79,10 @@ async def lifespan(app_instance: FastAPI):
 
     print(f"Scheduler configured to run every {SCHEDULER_INTERVAL_MINUTES} minutes")
 
-    for infra_dao_slug in INFRA_DAO_SLUGS:
-        # Run first scheduled job immediately
-        await scheduled_job(infra_dao_slug)
+    if ENVIRONMENT == 'development':
+        for infra_dao_slug in INFRA_DAO_SLUGS:
+            # Run first scheduled job immediately
+            await scheduled_job(infra_dao_slug)
 
     print("Server started: Job processor and scheduler are running")
 
