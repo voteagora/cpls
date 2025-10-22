@@ -36,11 +36,21 @@ class JobRequest(BaseModel):
 
 
 class JobQueue:
-    def __init__(self):
+    def __init__(self, num_workers: int = 4):
         self.queue: asyncio.Queue = asyncio.Queue()
         self.jobs: Dict[str, Job] = {}
-        self.current_job: Optional[Job] = None
+        self.current_job: Optional[Job] = None  # Deprecated, kept for backward compat
         self.processing = False
+        self.num_workers = num_workers
+        self.dao_locks: Dict[str, asyncio.Lock] = {}
+        self.worker_tasks: List[asyncio.Task] = []
+        self.workers_ready = asyncio.Event()
+
+    def _get_dao_lock(self, dao_slug: str) -> asyncio.Lock:
+        """Get or create a lock for a specific DAO"""
+        if dao_slug not in self.dao_locks:
+            self.dao_locks[dao_slug] = asyncio.Lock()
+        return self.dao_locks[dao_slug]
 
     async def add_job(self, job_type: str, payload: Dict) -> str:
         job_id = str(uuid.uuid4())
@@ -54,55 +64,104 @@ class JobQueue:
         await self.queue.put(job)
         return job_id
 
-    async def process_jobs(self, gcs_client: 'GCSClient'):
-        """Process jobs sequentially from the queue"""
-        self.processing = True
+    async def _worker(self, worker_id: int, gcs_client: 'GCSClient'):
+        """Worker task that processes jobs from the queue"""
+        print(f"🔧 Worker {worker_id} started")
+
+        # Wait for all workers to be ready before consuming
+        await self.workers_ready.wait()
+        print(f"🔧 Worker {worker_id} ready to process jobs")
+
         while self.processing:
             try:
                 job = await self.queue.get()
-                self.current_job = job
-                job.status = JobStatus.PROCESSING
-                job.started_at = datetime.now()
+                print(f"🔧 Worker {worker_id} got job {job.id}")
 
-                try:
-                    # Simulate job processing
-                    await self._execute_job(job)
-                    job.status = JobStatus.COMPLETED
-                except Exception as e:
-                    job.status = JobStatus.FAILED
-                    # Capture the full error message and traceback
-                    error_message = str(e)
-                    full_traceback = traceback.format_exc()
+                # Extract DAO slug from job payload
+                dao_slug = job.payload.get('infra_dao_slug')
+                if not dao_slug:
+                    print(f"Warning: Job {job.id} has no infra_dao_slug, skipping")
+                    self.queue.task_done()
+                    continue
 
-                    # Store error in job
-                    job.error = error_message
+                # Acquire lock for this DAO to ensure only one job per DAO
+                dao_lock = self._get_dao_lock(dao_slug)
 
-                    # Print detailed error information
-                    print(f"\n{'='*60}")
-                    print(f"❌ JOB FAILED: {job.id}")
-                    print(f"Job Type: {job.type}")
-                    print(f"Error: {error_message}")
-                    print(f"{'='*60}")
-                    print("Full Traceback:")
-                    print(full_traceback)
-                    print(f"{'='*60}\n")
-                finally:
-                    job.completed_at = datetime.now()
-                    self.current_job = None
+                print(f"🔧 Worker {worker_id} attempting to acquire lock for DAO {dao_slug}")
+                async with dao_lock:
+                    print(f"✅ Worker {worker_id} processing job {job.id} for DAO {dao_slug} (LOCK ACQUIRED)")
 
-                    # Upload result to GCS
-                    await gcs_client.safe_upload_job_result(job)
+                    # Update current_job for backward compatibility (shows last job started)
+                    self.current_job = job
+                    job.status = JobStatus.PROCESSING
+                    job.started_at = datetime.now()
+
+                    try:
+                        await self._execute_job(job)
+                        job.status = JobStatus.COMPLETED
+                    except Exception as e:
+                        job.status = JobStatus.FAILED
+                        # Capture the full error message and traceback
+                        error_message = str(e)
+                        full_traceback = traceback.format_exc()
+
+                        # Store error in job
+                        job.error = error_message
+
+                        # Print detailed error information
+                        print(f"\n{'='*60}")
+                        print(f"❌ JOB FAILED: {job.id} (Worker {worker_id})")
+                        print(f"Job Type: {job.type}")
+                        print(f"DAO: {dao_slug}")
+                        print(f"Error: {error_message}")
+                        print(f"{'='*60}")
+                        print("Full Traceback:")
+                        print(full_traceback)
+                        print(f"{'='*60}\n")
+                    finally:
+                        job.completed_at = datetime.now()
+
+                        # Upload result to GCS
+                        await gcs_client.safe_upload_job_result(job)
+
+                        self.queue.task_done()
+                        print(f"🔓 Worker {worker_id} finished job {job.id} for DAO {dao_slug} (LOCK RELEASED)")
 
             except asyncio.CancelledError:
+                print(f"Worker {worker_id} cancelled")
                 break
             except Exception as e:
                 print(f"\n{'='*60}")
-                print(f"❌ CRITICAL ERROR in job processing loop:")
+                print(f"❌ CRITICAL ERROR in worker {worker_id}:")
                 print(f"Error: {e}")
                 print(f"{'='*60}")
                 print("Full Traceback:")
                 print(traceback.format_exc())
                 print(f"{'='*60}\n")
+
+        print(f"Worker {worker_id} stopped")
+
+    async def process_jobs(self, gcs_client: 'GCSClient'):
+        """Start concurrent workers to process jobs from the queue"""
+        self.processing = True
+
+        # Spawn worker tasks
+        for i in range(self.num_workers):
+            task = asyncio.create_task(self._worker(i, gcs_client))
+            self.worker_tasks.append(task)
+
+        # Give all workers a chance to start up
+        await asyncio.sleep(0.1)
+
+        # Signal all workers to start consuming
+        self.workers_ready.set()
+        print(f"✅ Started {self.num_workers} concurrent workers")
+
+        # Wait for all workers to complete (when stop() is called)
+        try:
+            await asyncio.gather(*self.worker_tasks)
+        except asyncio.CancelledError:
+            print("Job processing cancelled")
 
     async def _execute_job(self, job: Job):
         """Execute the actual job logic"""
@@ -132,3 +191,6 @@ class JobQueue:
     def stop(self):
         """Stop processing jobs"""
         self.processing = False
+        # Cancel all worker tasks
+        for task in self.worker_tasks:
+            task.cancel()
