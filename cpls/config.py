@@ -14,3 +14,4 @@ SCHEDULER_INTERVAL_MINUTES = int(os.getenv("SCHEDULER_INTERVAL_MINUTES", "10"))
 ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", '')
 BLOCKCACHE_URL = os.getenv("BLOCKCACHE_URL", 'https://blockcache-production.up.railway.app/')
 DATABASE_URL = os.getenv("DATABASE_URL", '')
+WRITE_TO_DISK = ENVIRONMENT == 'development'

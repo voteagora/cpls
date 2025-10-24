@@ -6,14 +6,14 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, TYPE_CHECKING
 
-from .config import ENVIRONMENT
+from .config import ENVIRONMENT, WRITE_TO_DISK
 
 if TYPE_CHECKING:
     from .jobs import Job
 
 
 class GCSClient:
-    def __init__(self, bucket_name: str, write_local_copies: bool = False, local_copy_dir: str = "/Users/jm/code/cpls/data"):
+    def __init__(self, bucket_name: str, write_local_copies: bool = WRITE_TO_DISK, local_copy_dir: str = "/Users/jm/code/cpls/data"):
         self.bucket_name = bucket_name
         self.client = None
         self.bucket = None

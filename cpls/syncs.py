@@ -4,7 +4,7 @@
 # - end block not in schema, so we need to upgrade the schema
 
 from collections import defaultdict
-import time
+import time, copy
 
 import httpx
 import asyncpg
@@ -409,6 +409,70 @@ class EASOoDaoSync(Sync):
             print(qry)
             rows = await connection.fetch(qry)
             return rows
+        
+    async def read_proposal_type_range(self, dao_slug):
+
+        if dao_slug == 'jeffdao':
+            dao_slug = 'syndicate'
+
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(f"""select min(quorum::numeric)::text min_quorum_pct, max(quorum::numeric)::text max_quorum_pct, min(approval_threshold::numeric)::text min_approval_threshold_pct, max(approval_threshold::numeric)::text max_approval_threshold_pct from {dao_slug}.proposal_types;""")
+            return row
+        
+    async def read_snapshot_votable_supply(self, block_number, dao_slug):
+
+        if dao_slug == 'jeffdao':
+            dao_slug = 'syndicate'
+
+        token = '0x55f6e82a8bf5736d46837246dcbeaf7e61b3c27c'
+         
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(f"""select {dao_slug}.get_votable_supply_at_block({block_number}, '{token}') as votable_supply;""")
+            return int(row['votable_supply'])
+        
+    async def read_proposal_type(self, proposal_id):
+
+        qry = f"""SELECT 
+                    decoded_attestation
+                FROM 
+                    auazure.eas_attestations_v2 ea2
+                WHERE 
+                    data = (
+                        SELECT 
+                            ref_uid
+                        FROM 
+                            auazure.eas_attestations_v2 eav
+                        WHERE 
+                            topic3 = '0xc218b18af140c97644087c59e8ab35b981e73e026ffaf318f371c4ddc56efcb9'
+                            AND decoded_attestation->>'proposal_id' = '{proposal_id}'
+                        );"""
+
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(qry)
+
+            if row is None:
+                return None
+            
+            row = json.loads(row['decoded_attestation'])
+            return row
+
+
+        qry = """select decoded_attestation from  auazure.eas_attestations_v2 where id = 'log_0x244535597e1f8670a380d7eab2cf4d94a1bb57b93d89fe4cfff50fafe998b104_141'""";
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(qry)
+            row = json.loads(row['decoded_attestation'])
+            return row
+        
+        # pool = await self.pg.connect()
+        # async with pool.acquire() as connection:
+        #    rows = await connection.fetch(f"""select decoded_attestation->>'proposal_type' from auazure."eas_attestations_v2" ocp WHERE 
+        #                                                  topic3 = '0xc218b18af140c97644087c59e8ab35b981e73e026ffaf318f371c4ddc56efcb9' and
+        #                                                  decoded_attestation->'proposal_id' = '{proposal_id}' order by block_number desc;""")
+        #    return rows
     
     async def read_proposals(self):
         pool = await self.pg.connect()
@@ -437,6 +501,9 @@ class EASOoDaoSync(Sync):
 
         proposals = await self.read_proposals()
 
+        default_type_ranges = await self.read_proposal_type_range(self.infra_dao_slug)
+        default_type_ranges = {k : int(v) for k, v in default_type_ranges.items() if v is not None}
+
         anything_changed = False
 
         for proposal_meta in proposals:
@@ -447,16 +514,19 @@ class EASOoDaoSync(Sync):
 
             proposal['id'] = proposal_id
 
-            proposal_type = proposal.get('proposal_type', None)
+            proposal_type = await self.read_proposal_type(proposal_id)
 
             if proposal_type is None:
                 proposal_type_name = 'UNSET'
+                proposal_type = copy.deepcopy(default_type_ranges)
             else:
-                proposal_type_name = proposal_type.get('name')
+                proposal_type_name = proposal_type.get('class')
+
+            proposal['proposal_type'] = proposal_type
             
             proposal['proposer'] = to_eth_address(proposal_meta['author'])
             proposal['proposer_ens'] = await self.bc.get_ens(proposal['proposer'])
-            del proposal['author']
+            del proposal['author']            
 
             try:
                 existing_proposal_hash = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
@@ -481,6 +551,8 @@ class EASOoDaoSync(Sync):
 
             elif proposal_type == 'APPROVAL': 
                 raise NotImplementedError("Approval Types are Not implemented yet.")
+            else:
+                raise NotImplementedError(f"Proposal Type {proposal_type_name} is not implemented yet.")
 
             proposal['outcome'] = outcome
             proposal['tags'] = proposal['tags'].split(',')
@@ -506,7 +578,9 @@ class EASOoDaoSync(Sync):
             else:
                 end_block = -1
 
-            proposal['start_blocktime'] = endts
+            proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block, self.infra_dao_slug))
+
+            proposal['start_blocktime'] = startts
             proposal['end_blocktime'] = endts
 
             proposal['start_block'] = start_block
@@ -610,9 +684,9 @@ if __name__ == "__main__":
 
     import asyncio
 
-    # dns = EASOoDaoSync('jeffdao', reset=True)
+    dns = EASOoDaoSync('jeffdao', reset=True)
     # dns = EASAtlasSync('optimism', reset=True)
-    dns = DaoNodeSync('cyber', reset=True)
+    # dns = DaoNodeSync('cyber', reset=True)
 
     gcs_client = GCSClient(GCS_BUCKET_NAME)
 
