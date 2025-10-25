@@ -7,6 +7,7 @@ from .config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, AL
 
 import hashlib
 import json
+import time
 
 FIVE_MINUTES_IN_SECONDS = 5 * 60
 
@@ -179,7 +180,12 @@ class Sync:
 
         metadata = {'proposal_id': proposal['id']}
         metadata.update(data_eng_properties)
-        metadata['num_of_votes'] = proposal['num_of_votes']
+
+        # TODO-bomb, to come back and finis the other sources to support num_of_votes
+        if time.time() > 1764125888:
+            metadata['num_of_votes'] = proposal.get['num_of_votes']
+        else:
+            metadata['num_of_votes'] = proposal.get('num_of_votes', 0)
 
         proposal['data_eng_properties'] = data_eng_properties
     

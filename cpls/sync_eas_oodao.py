@@ -8,14 +8,21 @@ class EASOoDaoSync(Sync):
 
     SOURCE = 'eas-oodao'
 
-    async def read_votes(self, proposal_id):
+    async def read_votes_from_db(self, proposal_id):
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            qry = f"""select support, weight from syndicate.votes where proposal_id = '{proposal_id}';"""
+            rows = await connection.fetch(qry)
+            return rows
+
+    async def read_votes_direct_from_eas(self, proposal_id):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
             qry = f"""select * from auazure."eas_attestations_v2" ocv WHERE topic3 in ('0xffcc8fe77f55448bee5f0e24844ee76f83c3c2718dcf8a75de750cf4797ad0bc', '0x04cb5678af613212e584cf8d117ee3fcd038a9ab657ecf0c596cabe1e6ebd9f0') and decoded_attestation->'proposal_id' = '{proposal_id}';"""
             print(qry)
             rows = await connection.fetch(qry)
             return rows
-        
+
     async def read_proposal_type_range(self, dao_slug):
 
         if dao_slug == 'jeffdao':
@@ -155,7 +162,7 @@ class EASOoDaoSync(Sync):
                 skipped_count += 1
                 continue
 
-            votes = await self.read_votes(proposal_id)
+            votes = await self.read_votes_from_db(proposal_id)
             num_of_votes = len(votes)
 
             # No new votes have come in, we can re-use the last tally
@@ -173,10 +180,13 @@ class EASOoDaoSync(Sync):
                     outcome = defaultdict(lambda: defaultdict(int))
 
                     for vote in votes:
-                        vote = json.loads(vote['decoded_attestation']) #vote['decoded_attestation']
-                        print(vote)
-                        choice = vote['choice']
-                        outcome['token-holders'][choice] += await self.read_snapshot_voting_power(vote['voter'], vote['block_number'], self.infra_dao_slug)
+
+                        outcome['token-holders'][vote['support']] += int(vote['weight']) 
+
+                        # vote_att = json.loads(vote['decoded_attestation']) #vote['decoded_attestation']
+                        # print(vote)
+                        # choice = vote_att['choice']
+                        # outcome['token-holders'][choice] += await self.read_snapshot_voting_power(vote['voter'], vote['block_number'], self.infra_dao_slug)
                 
                     for key in outcome['token-holders'].keys():
                         outcome['token-holders'][key] = str(outcome['token-holders'][key])
