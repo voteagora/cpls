@@ -124,6 +124,8 @@ class Sync:
             msg = f"content state is unchanged"
             raise SkipProposal(msg, proposal_id=proposal['id'])
 
+        return proposal_hash
+
     async def read_existing_raw_proposal_hash_if_exists(self, proposal_id, gcs_client: 'GCSClient'):
 
         blob_name = self.proposal_blob_name(proposal_id)
