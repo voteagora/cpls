@@ -162,6 +162,9 @@ class Sync:
     
     async def overwrite_proposal(self, proposal, proposal_hash, liveness, gcs_client: 'GCSClient'):
 
+        if proposal_hash is None:
+            raise Exception("Proposal hash cannot be None")
+
         data_eng_properties = {
             'liveness': liveness,
             'source' : self.SOURCE,
