@@ -7,6 +7,8 @@ from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS
 
 from .title_processor import get_title_from_proposal_description
 
+from .config import ALCHEMY_API_KEY
+
 class EASAtlasSync(Sync):
 
     SOURCE = 'eas-atlas'
