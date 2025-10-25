@@ -149,7 +149,7 @@ class Sync:
     
             existing_liveness = blob.metadata['liveness']
             existing_proposal_hash = blob.metadata['hash']
-            existing_num_of_votes = blob.metadata['num_of_votes']
+            existing_num_of_votes = blob.metadata.get('num_of_votes', 0)
             if existing_proposal_hash is None:
                 raise Exception("Proposal hash cannot be None if the proposal exists.  This is a bug.")
         else:                
