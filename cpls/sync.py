@@ -146,6 +146,8 @@ class Sync:
     
             existing_liveness = blob.metadata['liveness']
             existing_proposal_hash = blob.metadata['hash']
+            if existing_proposal_hash is None:
+                raise Exception("Proposal hash cannot be None if the proposal exists.  This is a bug.")
         else:                
             existing_liveness = 'new'
             existing_proposal_hash = 'no-hash'
