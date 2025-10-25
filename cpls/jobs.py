@@ -6,7 +6,10 @@ from typing import Dict, Optional, List, TYPE_CHECKING
 from datetime import datetime
 from pydantic import BaseModel
 from enum import Enum
-from .syncs import DaoNodeSync, EASAtlasSync, EASOoDaoSync
+
+from .sync_daonode import DaoNodeSync
+from .sync_eas_atlas import EASAtlasSync
+from .sync_eas_oodao import EASOoDaoSync
 
 import requests as r
 
