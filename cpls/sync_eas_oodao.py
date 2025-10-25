@@ -1,4 +1,4 @@
-import json, time
+import json, time, copy
 from collections import defaultdict
 
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS, to_eth_address
