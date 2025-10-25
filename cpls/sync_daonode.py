@@ -112,7 +112,7 @@ class DaoNodeSync(Sync):
                     proposal['lifecycle_stage'] = 'PASSED'
                     liveness = 'archived'
 
-                if liveness != 'archive':
+                if liveness != 'archived':
 
                     if proposal['end_blocktime'] < curtime:
 
