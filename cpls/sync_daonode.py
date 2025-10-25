@@ -28,6 +28,9 @@ class DaoNodeSync(Sync):
             for proposal_info in proposals:
                 proposal_id = proposal_info['id']
 
+                if proposal_id == '103713749716503028671815481721039004389156473487450783632177114353117435138377':
+                    continue
+
                 try:
                     blob, existing_liveness, existing_proposal_hash, existing_num_of_votes  = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
                 except SkipProposal as e:
