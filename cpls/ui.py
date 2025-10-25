@@ -34,6 +34,10 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
             JobStatus.FAILED: "#DC143C"
         }.get(job.status, "#808080")
 
+        # Extract stats if available
+        refreshed = job.stats.get('total_refreshed', '-') if job.stats else '-'
+        skipped = job.stats.get('total_skipped', '-') if job.stats else '-'
+
         job_rows += f"""
         <tr>
             <td>
@@ -44,6 +48,8 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
             <td>{job.payload.get('infra_dao_slug', '-')}</td>
             <td>{job.payload.get('source', '-')}</td>
             <td style="color: {status_color}; font-weight: bold;">{job.status}</td>
+            <td>{refreshed}</td>
+            <td>{skipped}</td>
             <td>{job.created_at.strftime('%Y-%m-%d %H:%M:%S')}</td>
             <td>{job.started_at.strftime('%H:%M:%S') if job.started_at else '-'}</td>
             <td>{job.completed_at.strftime('%H:%M:%S') if job.completed_at else '-'}</td>
@@ -182,7 +188,7 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
 
                 rows.forEach(row => {{
                     // Skip the "No jobs yet" row
-                    if (row.cells.length < 9) {{
+                    if (row.cells.length < 11) {{
                         return;
                     }}
 
@@ -241,6 +247,8 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
                     <th>Infra DAO Slug</th>
                     <th>Source</th>
                     <th>Status</th>
+                    <th>Refreshed</th>
+                    <th>Skipped</th>
                     <th>Created</th>
                     <th>Started</th>
                     <th>Completed</th>
@@ -248,7 +256,7 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
                 </tr>
             </thead>
             <tbody>
-                {job_rows if job_rows else '<tr><td colspan="9" style="text-align: center;">No jobs yet</td></tr>'}
+                {job_rows if job_rows else '<tr><td colspan="11" style="text-align: center;">No jobs yet</td></tr>'}
             </tbody>
         </table>
     </body>

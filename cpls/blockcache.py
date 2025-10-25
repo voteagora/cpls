@@ -1,4 +1,5 @@
 import httpx
+from eth_abi import encode
 
 class BlockNotFound(Exception):
     pass
@@ -59,3 +60,52 @@ class BlockCacheClient:
         else:
             data = resp.json()
             return data
+    
+    async def get_decoded_eas(self, chain_id, attestation_id):
+
+        headers = self.headers()
+        url = self.base_url + f"/decoded_eas/{chain_id}/attestation/{attestation_id}"
+        resp = await self.client.get(url, headers=headers)
+
+        if resp.status_code == 200:
+            data = resp.json()
+            return data
+
+    async def contract_call(self, chain_id, contract_address, method_signature, block_number, data):
+        headers = self.headers()
+        url = self.base_url + f"/contract_call/{chain_id}/{contract_address}/{method_signature}"
+        payload = {
+            "block_number": block_number,
+            "data": data
+        }
+
+        resp = await self.client.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def contract_call_encoded(self, chain_id, contract_address, block_number, method_signature, values):
+
+        # Encode the parameters according to the schema
+
+        method_name = method_signature.split("(")[0]
+        method_schema = method_signature.replace(method_name + "(", "")[:-1].split(",")
+        
+        encoded_params = encode(method_schema, values)
+
+        # Convert to hex string with 0x prefix
+        data = str(encoded_params.hex()).removeprefix("0x")
+
+        # Call the lower-level contract_call method
+        result = await self.contract_call(chain_id, contract_address, method_signature, block_number, data)
+
+        return result
+    
+if __name__ == '__main__':
+
+    # print(encode(['uint256'], [72632202831118589040926236054696792722825676801797403282713292252351025742144]).hex())
+
+    from .config import BLOCKCACHE_URL, ALCHEMY_API_KEY
+    import asyncio
+    loop = asyncio.get_event_loop()
+    cache = BlockCacheClient('http://0.0.0.0:8002', ALCHEMY_API_KEY)
+    loop.run_until_complete(cache.contract_call_encoded(7560, '0x58E53131c339aA3cBA35904538eA5948f751050a', 23986826, 'state(uint256)', [72632202831118589040926236054696792722825676801797403282713292252351025742144]))

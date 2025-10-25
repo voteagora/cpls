@@ -148,17 +148,19 @@ class Sync:
     
             existing_liveness = blob.metadata['liveness']
             existing_proposal_hash = blob.metadata['hash']
+            existing_num_of_votes = blob.metadata['num_of_votes']
             if existing_proposal_hash is None:
                 raise Exception("Proposal hash cannot be None if the proposal exists.  This is a bug.")
         else:                
             existing_liveness = 'new'
             existing_proposal_hash = 'no-hash'
+            existing_num_of_votes = 0
 
         if existing_liveness == 'archived' and not self.reset:
             msg = f"Proposal is in archival state."
             raise SkipProposal(msg, proposal_id=proposal_id)
 
-        return blob, existing_liveness, existing_proposal_hash
+        return blob, existing_liveness, existing_proposal_hash, existing_num_of_votes
         
     async def get_timestamp(self, chain_id, block_number):
         blocktime = await self.bc.get_blocktime(chain_id, block_number)
@@ -177,6 +179,7 @@ class Sync:
 
         metadata = {'proposal_id': proposal['id']}
         metadata.update(data_eng_properties)
+        metadata['num_of_votes'] = proposal['num_of_votes']
 
         proposal['data_eng_properties'] = data_eng_properties
     
@@ -191,9 +194,13 @@ if __name__ == "__main__":
 
     import asyncio
 
+    from .sync_daonode import DaoNodeSync
+    from .sync_eas_atlas import EASAtlasSync
+    from .sync_eas_oodao import EASOoDaoSync
+
     dns = EASOoDaoSync('jeffdao', reset=True)
     # dns = EASAtlasSync('optimism', reset=True)
-    # dns = DaoNodeSync('cyber', reset=True)
+    # dns = DaoNodeSync('scroll', reset=False)
 
     gcs_client = GCSClient(GCS_BUCKET_NAME)
 

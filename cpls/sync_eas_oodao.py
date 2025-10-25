@@ -37,7 +37,19 @@ class EASOoDaoSync(Sync):
         async with pool.acquire() as connection:
             row = await connection.fetchrow(f"""select {dao_slug}.get_votable_supply_at_block({block_number}, '{token}') as votable_supply;""")
             return int(row['votable_supply'])
-        
+
+    async def read_snapshot_voting_power(self, delegate, block_number, dao_slug):
+
+        if dao_slug == 'jeffdao':
+            dao_slug = 'syndicate'
+
+        token = '0x55f6e82a8bf5736d46837246dcbeaf7e61b3c27c'
+         
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(f"""select {dao_slug}.get_voting_power_at_block('{delegate}', {block_number}, '{token}') as voting_power;""")
+            return int(row['voting_power'])
+           
     async def read_proposal_type(self, proposal_id):
 
         qry = f"""SELECT 
@@ -111,6 +123,8 @@ class EASOoDaoSync(Sync):
         default_type_ranges = {k : int(v) for k, v in default_type_ranges.items() if v is not None}
 
         anything_changed = False
+        skipped_count = 0
+        refreshed_count = 0
 
         for proposal_meta in proposals:
 
@@ -135,30 +149,42 @@ class EASOoDaoSync(Sync):
             del proposal['author']            
 
             try:
-                existing_proposal_hash = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
+                blob, existing_liveness, existing_proposal_hash, existing_num_of_votes = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
             except SkipProposal as e:
                 print(e)
+                skipped_count += 1
                 continue
 
             votes = await self.read_votes(proposal_id)
+            num_of_votes = len(votes)
+
+            # No new votes have come in, we can re-use the last tally
+            reuse_tally = existing_num_of_votes > 0 and (existing_num_of_votes == num_of_votes)
+
+            proposal['num_of_votes'] = num_of_votes
+
+            if reuse_tally:
+                existing_proposal_data = await gcs_client.read_dict(blob.name)
+                outcome = existing_proposal_data['outcome']
             
-            if proposal_type_name in ('UNSET', 'OPTIMISTIC', 'STANDARD'):
-
-                outcome = defaultdict(lambda: defaultdict(int))
-
-                for vote in votes:
-                    vote = json.loads(vote['decoded_attestation']) #vote['decoded_attestation']
-                    print(vote)
-                    choice = vote['choice']
-                    outcome['token-holders'][choice] += 1 * 1000000000000000000 # TODO, bring in actual VP
-            
-                for key in outcome['token-holders'].keys():
-                    outcome['token-holders'][key] = str(outcome['token-holders'][key])
-
-            elif proposal_type == 'APPROVAL': 
-                raise NotImplementedError("Approval Types are Not implemented yet.")
             else:
-                raise NotImplementedError(f"Proposal Type {proposal_type_name} is not implemented yet.")
+                if proposal_type_name in ('UNSET', 'OPTIMISTIC', 'STANDARD'):
+
+                    outcome = defaultdict(lambda: defaultdict(int))
+
+                    for vote in votes:
+                        vote = json.loads(vote['decoded_attestation']) #vote['decoded_attestation']
+                        print(vote)
+                        choice = vote['choice']
+                        outcome['token-holders'][choice] += await self.read_snapshot_voting_power(vote['voter'], vote['block_number'], self.infra_dao_slug)
+                
+                    for key in outcome['token-holders'].keys():
+                        outcome['token-holders'][key] = str(outcome['token-holders'][key])
+
+                elif proposal_type == 'APPROVAL': 
+                    raise NotImplementedError("Approval Types are Not implemented yet.")
+                else:
+                    raise NotImplementedError(f"Proposal Type {proposal_type_name} is not implemented yet.")
 
             proposal['outcome'] = outcome
             proposal['tags'] = proposal['tags'].split(',')
@@ -167,6 +193,7 @@ class EASOoDaoSync(Sync):
                 proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
             except SkipProposal as e:
                 print(e)
+                skipped_count += 1
                 continue
 
             startts = int(proposal_meta['startts'])
@@ -184,7 +211,27 @@ class EASOoDaoSync(Sync):
             else:
                 end_block = -1
 
-            proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block, self.infra_dao_slug))
+
+            if start_block > 0:
+                proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block, self.infra_dao_slug))
+            
+            # TODO - detect if cancelled.
+
+            if False:
+                proproal['lifecycle_stage'] = 'CANCELLED'
+            elif curts >= startts:
+                proposal['lifecycle_stage'] = 'PENDING'
+            elif startts <= curts < endts:
+                proposal['lifecycle_stage'] = 'ACTIVE'
+            elif curts >= endts:
+
+                passing_quorum = proposal['total_voting_power_at_start'] * proposal['quorum']
+                
+                if proposal['outcome']['token-holders']['YES'] >= passing_quorum:
+                    proposal['lifecycle_stage'] = 'PASSED'
+                else:
+                    proposal['lifecycle_stage'] = 'FAILED'
+
 
             proposal['start_blocktime'] = startts
             proposal['end_blocktime'] = endts
@@ -202,11 +249,17 @@ class EASOoDaoSync(Sync):
                 liveness = 'archived'
 
             anything_changed = True
+            refreshed_count += 1
 
             await self.overwrite_proposal(proposal, proposal_hash, liveness, gcs_client)
 
         if anything_changed:
             await self.refresh_source_list(gcs_client)
             await self.refresh_full_list(gcs_client)
+
+        return {
+            'skipped': skipped_count,
+            'refreshed': refreshed_count
+        }
 
 

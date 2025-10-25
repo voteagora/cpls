@@ -2,6 +2,8 @@ import time, json
 
 from collections import defaultdict
 
+import httpx
+
 from .gcs import GCSClient
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS
 
@@ -41,6 +43,8 @@ class EASAtlasSync(Sync):
         headers = {'alchemy-api-key': ALCHEMY_API_KEY}
 
         anything_changed = False
+        skipped_count = 0
+        refreshed_count = 0
         for proposals_uid in known_create_attestations[self.infra_dao_slug]:
 
             for chain_id in [10, 1]:
@@ -53,7 +57,11 @@ class EASAtlasSync(Sync):
                     print(f"Failed to fetch proposal {proposals_uid}")
                     continue
 
-                proposal_attestation = response.json()
+                proposal_attestation = await self.bc.get_decoded_eas(chain_id, proposals_uid)
+
+                if proposal_attestation is None:
+                    print(f"Failed to fetch proposal {proposals_uid}")
+                    continue
 
                 if proposal_attestation['attestation']['uid'] == '0x0000000000000000000000000000000000000000000000000000000000000000':
                     print(f"Failed to fetch proposal {proposals_uid}")
@@ -75,6 +83,7 @@ class EASAtlasSync(Sync):
                     existing_proposal_hash = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
                 except SkipProposal as e:
                     print(e)
+                    skipped_count += 1
                     continue
 
                 proposal['title'] = get_title_from_proposal_description(proposal['description'])
@@ -111,6 +120,7 @@ class EASAtlasSync(Sync):
                     proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
                 except SkipProposal as e:
                     print(e)
+                    skipped_count += 1
                     continue
 
 
@@ -136,10 +146,16 @@ class EASAtlasSync(Sync):
                     liveness = 'archived'
 
                 anything_changed = True
+                refreshed_count += 1
 
                 await self.overwrite_proposal(proposal, proposal_hash, liveness, gcs_client)
 
             if anything_changed:
                 await self.refresh_source_list(gcs_client)
                 await self.refresh_full_list(gcs_client)
+
+        return {
+            'skipped': skipped_count,
+            'refreshed': refreshed_count
+        }
 

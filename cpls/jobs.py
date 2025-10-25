@@ -31,6 +31,7 @@ class Job(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error: Optional[str] = None
+    stats: Optional[Dict] = None
 
 
 class JobRequest(BaseModel):
@@ -176,21 +177,39 @@ class JobQueue:
 
         print(job.payload)
 
+        # Initialize stats structure
+        total_skipped = 0
+        total_refreshed = 0
+        stats_by_source = {}
+
         for source in job.payload['sources']:
 
             infra_dao_slug = job.payload['infra_dao_slug']
             gcs_client = GCSClient(GCS_BUCKET_NAME)
-            
+
             if source == 'dao_node':
-                await DaoNodeSync(infra_dao_slug).refresh_list(gcs_client)
+                stats = await DaoNodeSync(infra_dao_slug).refresh_list(gcs_client)
             elif source == 'eas-atlas':
-                await EASAtlasSync(infra_dao_slug).refresh_list(gcs_client)
+                stats = await EASAtlasSync(infra_dao_slug).refresh_list(gcs_client)
             elif source == 'eas-oodao':
-                await EASOoDaoSync(infra_dao_slug).refresh_list(gcs_client)
+                stats = await EASOoDaoSync(infra_dao_slug).refresh_list(gcs_client)
             else:
                 raise Exception(f"Unknown source: {source}")
 
-        print(f"Completed job {job.id}")
+            # Collect stats
+            if stats:
+                stats_by_source[source] = stats
+                total_skipped += stats.get('skipped', 0)
+                total_refreshed += stats.get('refreshed', 0)
+
+        # Store stats in the job
+        job.stats = {
+            'total_skipped': total_skipped,
+            'total_refreshed': total_refreshed,
+            'by_source': stats_by_source
+        }
+
+        print(f"Completed job {job.id} - Refreshed: {total_refreshed}, Skipped: {total_skipped}")
 
     def get_all_jobs(self) -> 'List[Job]':
         """Get all jobs sorted by creation time"""
