@@ -69,7 +69,7 @@ async def lifespan(app_instance: FastAPI):
         scheduler.add_job(
             scheduled_job,
             'interval',
-            seconds=int(SCHEDULER_INTERVAL_MINUTES * 60),
+            minutes=SCHEDULER_INTERVAL_MINUTES,
             id='scheduled_job-' + infra_dao_slug,
             max_instances=1,
             kwargs = {'infra_dao_slug': infra_dao_slug}
