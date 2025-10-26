@@ -100,13 +100,16 @@ class EASOoDaoSync(Sync):
         #    return rows
     
     async def read_proposals(self):
+
+        # TODO - Filter on DAO-ID
+
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
             rows = await connection.fetch(f"""select 
                                                 transaction_hash,
-                                                topic1 as dao_id,
+                                                topic1_cropped as dao_id,
                                                 data as uid,
-                                                topic2 as author,
+                                                topic2_cropped as author,
                                                 chain_id,
                                                 decoded_attestation->>'tags' as tags,
                                                 decoded_attestation->'endts' as endts,
@@ -117,6 +120,23 @@ class EASOoDaoSync(Sync):
                                                 from auazure."eas_attestations_v2" ocp WHERE topic3 = '0x12e8600c9bb57b5b436fa09735cfc63e95098552122001c465b610261eea8a93';""")
             return rows
 
+    async def read_proposal_deletions(self):
+
+        # TODO - Filter on DAO-ID
+
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(f"""select 
+                                                transaction_hash,
+                                                topic1_cropped as dao_id,
+                                                data as uid,
+                                                topic2_cropped as deleter,
+                                                chain_id,
+                                                ref_uid,
+                                                attestation_time
+                                                from auazure."eas_attestations_v2" ocp WHERE decoded_attestation->>'verb' = 'CREATE_PROPOSAL';""")
+            return rows
+
     async def refresh_list(self, gcs_client: 'GCSClient'):
 
 
@@ -125,6 +145,9 @@ class EASOoDaoSync(Sync):
         #
 
         proposals = await self.read_proposals()
+        deletions = await self.read_proposal_deletions()
+
+        deletions = {row['ref_uid'] : dict(row) for row in deletions}
 
         default_type_ranges = await self.read_proposal_type_range(self.infra_dao_slug)
         default_type_ranges = {k : int(v) for k, v in default_type_ranges.items() if v is not None}
@@ -138,6 +161,9 @@ class EASOoDaoSync(Sync):
             proposal = dict(proposal_meta)
 
             proposal_id = proposal_meta['proposal_id']
+
+            if proposal['uid'] in deletions:
+                proposal['delete_event'] = deletions[proposal['uid']]
 
             proposal['id'] = proposal_id
 
@@ -198,6 +224,8 @@ class EASOoDaoSync(Sync):
 
             proposal['outcome'] = outcome
             proposal['tags'] = proposal['tags'].split(',')
+
+
         
             try:
                 proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
