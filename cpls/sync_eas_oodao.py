@@ -253,22 +253,35 @@ class EASOoDaoSync(Sync):
             if start_block > 0:
                 proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block, self.infra_dao_slug))
             
-            # TODO - detect if cancelled.
-
-            if False:
-                proproal['lifecycle_stage'] = 'CANCELLED'
-            elif curts >= startts:
+            if 'delete_event' in proposal:
+                proposal['lifecycle_stage'] = 'CANCELLED'
+            elif curts < startts:
                 proposal['lifecycle_stage'] = 'PENDING'
             elif startts <= curts < endts:
                 proposal['lifecycle_stage'] = 'ACTIVE'
             elif curts >= endts:
 
-                passing_quorum = proposal['total_voting_power_at_start'] * proposal['quorum']
-                
-                if proposal['outcome']['token-holders']['YES'] >= passing_quorum:
-                    proposal['lifecycle_stage'] = 'PASSED'
+                if proposal_type_name == 'UNSET':
+                    proposal['lifecycle_stage'] = 'EXPIRED'
+                    liveness = 'archived'
                 else:
-                    proposal['lifecycle_stage'] = 'FAILED'
+
+                    # TODO - Count Abstain?
+
+                    passing_quorum = (proposal['proposal_type']['quorum'] / 10000) * int(proposal['total_voting_power_at_start'])
+                    passing_approval_threshold = (proposal['proposal_type']['approval_threshold'] / 10000) * int(proposal['total_voting_power_at_start'])
+                    
+                    quorum_check = passing_quorum > (proposal['outcome']['token-holders'][1] + proposal['outcome']['token-holders'][2]) 
+                    approval_check = passing_approval_threshold > proposal['outcome']['token-holders'][1]
+
+                    proposal['quorum_check'] = quorum_check
+                    proposal['approval_check'] = approval_check
+
+                    if quorum_check and approval_check:
+                        proposal['lifecycle_stage'] = 'PASSED'
+                        
+                    else:
+                        proposal['lifecycle_stage'] = 'DEFEATED'
 
 
             proposal['start_blocktime'] = startts
