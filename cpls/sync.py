@@ -53,9 +53,9 @@ class Sync:
 
         if liveness == 'live':
             if ENVIRONMENT == 'production':
-                max_age = 30 * SCHEDULER_INTERVAL_MINUTES # half a scheduler cycle
+                max_age = int(30 * SCHEDULER_INTERVAL_MINUTES) # half a scheduler cycle
             else:
-                max_age = 10 * SCHEDULER_INTERVAL_MINUTES # 1/6th of a scheduler cycle - just enough to see if it's working.
+                max_age = int(10 * SCHEDULER_INTERVAL_MINUTES) # 1/6th of a scheduler cycle - just enough to see if it's working.
             
         elif liveness == 'archived':
             if ENVIRONMENT == 'production':
