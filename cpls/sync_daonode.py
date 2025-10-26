@@ -25,11 +25,17 @@ class DaoNodeSync(Sync):
             skipped_count = 0
             refreshed_count = 0
 
-            for proposal_info in proposals:
+            for i, proposal_info in enumerate(proposals):
+            
                 proposal_id = proposal_info['id']
 
-                if proposal_id == '103713749716503028671815481721039004389156473487450783632177114353117435138377':
+                OPTIMISM_TEST_PROPOSALS = ['90839767999322802375479087567202389126141447078032129455920633707568400402209',
+                                           '28601282374834906210319879956567232553560898502158891728063939287236508034960',
+                                           '89934444025525534467725222948723300602129924689317116631018191521555230364343']
+                
+                if proposal_id in OPTIMISM_TEST_PROPOSALS:
                     continue
+
 
                 try:
                     blob, existing_liveness, existing_proposal_hash, existing_num_of_votes  = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
@@ -76,7 +82,7 @@ class DaoNodeSync(Sync):
 
                 curtime = time.time()
                 
-                print(proposal['start_blocktime'], curtime, proposal['end_blocktime'])
+                # print(proposal['start_blocktime'], curtime, proposal['end_blocktime'])
 
                 """
                 enum ProposalState {
@@ -104,14 +110,31 @@ class DaoNodeSync(Sync):
                     proposal['lifecycle_stage'] = 'EXECUTED'
                     liveness = 'archived'
 
-                # TODO - Figure out how to detect "PASSED", in an automated way without polling.
+                # TODO - Figure out how to detect "PASSED", in an automated way without polling. ie, the state of having a succeeded proposal
+                #        That can't be queued successfully because, for instance, timelock permissions.
                 CYBER_PASSED_PROPOSALS = ['75448677353223676977806688663112177034253117296912078788499719032483591083949']
                 SCROLL_PASSED_PROPOSALS = ['545246063317575466165740766113143372181954164634411861681132968954652703515',
                                             '1247605826408291988137032745109360457689615424039552986782425232092434978933',
                                             '81939631158579841171219988954315753236293867421581097385921335841780903893992',
                                             '115203962227058139384278248635798144936351291766909949005270484145680009554500']
+                OPTIMISM_PASSED_PROPOSALS = ['71928632649116715308847337447543955907072794738294227130170691217045092512147']
 
-                if proposal['id'] in CYBER_PASSED_PROPOSALS + SCROLL_PASSED_PROPOSALS:
+                # This is a known issue with Optimism, where the proposal is marked as "succeeded" but it's not really succeeded, the onchain stage is 1 (active) 1 block after it ended, but 3 (defeated) at a random block in Oct 2025.
+                OPTIMISM_CORRUPTED_PROPOSALS_MARKED_SUCCEEDED_I_GUESS = ['103713749716503028671815481721039004389156473487450783632177114353117435138377',
+                                                                         '2808108363564117434228597137832979672586627356483314020876637262618986508713',
+                                                                         '29831001453379581627736734765818959389842109811221412662144194715522205098015',
+                                                                         '80982553847843251343725022866904947381762263529096361834044805234222094077710',
+                                                                         '64930538748268257621925093712454552173772860987977453334165023026835711650357',
+                                                                         '51738314696473345172141808043782330430064117614433447104828853768775712054864',
+                                                                         '114732572201709734114347859370226754519763657304898989580338326275038680037913', # For some reason, we can't get state for this proposal, as of the block number after the end of the proposal.
+                                                                         '27878184270712708211495755831534918916136653803154031118511283847257927730426', 
+                                                                         '103606400798595803012644966342403441743733355496979747669804254618774477345292']       
+
+                if proposal['id'] in OPTIMISM_CORRUPTED_PROPOSALS_MARKED_SUCCEEDED_I_GUESS:
+                    proposal['lifecycle_stage'] = 'SUCCEEDED'
+                    liveness = 'archived'
+
+                if proposal['id'] in CYBER_PASSED_PROPOSALS + SCROLL_PASSED_PROPOSALS + OPTIMISM_PASSED_PROPOSALS:
                     proposal['lifecycle_stage'] = 'PASSED'
                     liveness = 'archived'
 
@@ -126,8 +149,32 @@ class DaoNodeSync(Sync):
                         # The real way to check 'PASSED', is for proposals with invalid transaction call data. See Scroll
                         # We don't really care about any other state, but are happy to help the front-end.
 
+
+
                         encoded_state = await self.bc.contract_call_encoded(chain_id, gov_addr,  proposal['end_block'] + 1, 'state(uint256)', [int(proposal['id'])])
                         stage = encoded_state['result']
+
+                        BLOCK_AROUND_TIME_WHEN_PROPOSALS_STARTED_GETTING_BORKED = 126449975
+                        if self.infra_dao_slug == 'optimism' and (proposal['end_block'] <= BLOCK_AROUND_TIME_WHEN_PROPOSALS_STARTED_GETTING_BORKED):
+
+                            SOME_BLOCK_IN_2025 = 142917636
+
+                            encoded_state = await self.bc.contract_call_encoded(chain_id, gov_addr,  SOME_BLOCK_IN_2025, 'state(uint256)', [int(proposal['id'])])
+                            fresh_stage = encoded_state['result']
+
+                            if stage == fresh_stage:
+                                pass # print(f'MATCH: {stage} for {proposal_id}')
+                            else:
+                                if stage == '0x0000000000000000000000000000000000000000000000000000000000000004':
+                                    proposal['lifecycle_stage'] = 'SUCCEEDED'
+                                    liveness = 'archived'
+                                    continue
+
+                                if stage != fresh_stage:
+                                    print(f"PROBLEM: {stage} vs {fresh_stage} for {proposal_id}")
+                                    proposal['lifecycle_stage'] = 'ERROR'
+                                    liveness = 'archived'
+                                    continue
 
                         if stage == '0x0000000000000000000000000000000000000000000000000000000000000003':
                             
@@ -147,7 +194,7 @@ class DaoNodeSync(Sync):
                                 proposal['lifecycle_stage'] = 'SUCCEEDED'
                         
                         else:
-                            raise Exception(f"Unhandled proposal lifecycle stage {stage} for proposal_id: {proposal_id}")
+                            raise Exception(f"Unhandled proposal lifecycle stage {stage} vs {fresh_stage} for proposal_id: {proposal_id}")
 
                     elif proposal['start_blocktime'] < curtime < proposal['end_blocktime']:
                         # We know it's, because if it was cancelled, we would have picked up the CANCEL event.
