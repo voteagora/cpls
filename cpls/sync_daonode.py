@@ -18,6 +18,9 @@ class DaoNodeSync(Sync):
             chain_id = deployment['chain_id']
             gov_addr = deployment['gov']['address']
 
+            response = await http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/progress")
+            some_pretty_recent_block = response.json()['block']
+
             response = await http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposals")
             proposals = response.json()['proposals']
 
@@ -52,6 +55,10 @@ class DaoNodeSync(Sync):
                     print(e)
                     skipped_count += 1
                     continue
+
+                # These are needed for cache busting.
+                proposal['after_start_block'] = proposal['start_block'] > some_pretty_recent_block
+                proposal['after_end_block'] = proposal['end_block'] > some_pretty_recent_block
 
                 try:
                     proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
@@ -128,7 +135,10 @@ class DaoNodeSync(Sync):
                                                                          '51738314696473345172141808043782330430064117614433447104828853768775712054864',
                                                                          '114732572201709734114347859370226754519763657304898989580338326275038680037913', # For some reason, we can't get state for this proposal, as of the block number after the end of the proposal.
                                                                          '27878184270712708211495755831534918916136653803154031118511283847257927730426', 
-                                                                         '103606400798595803012644966342403441743733355496979747669804254618774477345292']       
+                                                                         '103606400798595803012644966342403441743733355496979747669804254618774477345292',
+                                                                         '32970701904870446614408373011942917680422376755229075190214017021915019093516',
+                                                                         '94365805422398770067924881378455503928423439630602149628781926844759467250082',
+                                                                         '103695324913424597802389181312722993037601032681914451632412140667432224173014']       
 
                 if proposal['id'] in OPTIMISM_CORRUPTED_PROPOSALS_MARKED_SUCCEEDED_I_GUESS:
                     proposal['lifecycle_stage'] = 'SUCCEEDED'
@@ -168,13 +178,16 @@ class DaoNodeSync(Sync):
                                 if stage == '0x0000000000000000000000000000000000000000000000000000000000000004':
                                     proposal['lifecycle_stage'] = 'SUCCEEDED'
                                     liveness = 'archived'
-                                    continue
 
-                                if stage != fresh_stage:
-                                    print(f"PROBLEM: {stage} vs {fresh_stage} for {proposal_id}")
-                                    proposal['lifecycle_stage'] = 'ERROR'
-                                    liveness = 'archived'
-                                    continue
+                                elif stage != fresh_stage:
+                                    msg = (f"PROBLEM: {stage} vs {fresh_stage} for {proposal_id}")
+                                    raise Exception(msg)
+
+
+                        if stage == '0x0000000000000000000000000000000000000000000000000000000000000004' and proposal['voting_module_name'] in ('optimismtic', 'approval'):
+                            proposal['lifecycle_stage'] = 'SUCCEEDED'
+                            liveness = 'archived'
+
 
                         if stage == '0x0000000000000000000000000000000000000000000000000000000000000003':
                             
