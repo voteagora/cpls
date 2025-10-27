@@ -32,7 +32,7 @@ async def scheduled_job(infra_dao_slug):
 
     if infra_dao_slug == 'optimism':
         sources = ['dao_node', 'eas-atlas']
-    elif infra_dao_slug == 'jeffdao':
+    elif infra_dao_slug == 'syndicate':
         sources = ['eas-oodao']
     elif infra_dao_slug in ('scroll', 'cyber', 'pguild'):
         sources = ['dao_node']
