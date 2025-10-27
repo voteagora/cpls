@@ -8,25 +8,22 @@ class EASOoDaoSync(Sync):
 
     SOURCE = 'eas-oodao'
 
-    async def read_votes_from_db(self, proposal_id):
+    async def read_votes_from_db(self, proposal_id, dao_slug):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            qry = f"""select support, weight from syndicate.votes where proposal_id = '{proposal_id}';"""
+            qry = f"""select support, weight from {dao_slug}.votes where proposal_id = '{proposal_id}';"""
             rows = await connection.fetch(qry)
             return rows
 
     async def read_votes_direct_from_eas(self, proposal_id):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            qry = f"""select * from auazure."eas_attestations_v2" ocv WHERE topic3 in ('0xffcc8fe77f55448bee5f0e24844ee76f83c3c2718dcf8a75de750cf4797ad0bc', '0x04cb5678af613212e584cf8d117ee3fcd038a9ab657ecf0c596cabe1e6ebd9f0') and decoded_attestation->'proposal_id' = '{proposal_id}';"""
+            qry = f"""select * from auazure."eas_attestations_v2" ocv WHERE topic3 in ('0xa68afde70897d2955e726c1a1da9e77ab466994b5da6666ceb518a5c538edc1e', '0x22e4a4e20f724e4162a553d076493d05d3edaff561c2708f67f4a23067074413') and decoded_attestation->'proposal_id' = '{proposal_id}';"""
             print(qry)
             rows = await connection.fetch(qry)
             return rows
 
     async def read_proposal_type_range(self, dao_slug):
-
-        if dao_slug == 'jeffdao':
-            dao_slug = 'syndicate'
 
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
@@ -34,9 +31,6 @@ class EASOoDaoSync(Sync):
             return row
         
     async def read_snapshot_votable_supply(self, block_number, dao_slug):
-
-        if dao_slug == 'jeffdao':
-            dao_slug = 'syndicate'
 
         token = '0x55f6e82a8bf5736d46837246dcbeaf7e61b3c27c'
          
@@ -46,9 +40,6 @@ class EASOoDaoSync(Sync):
             return int(row['votable_supply'])
 
     async def read_snapshot_voting_power(self, delegate, block_number, dao_slug):
-
-        if dao_slug == 'jeffdao':
-            dao_slug = 'syndicate'
 
         token = '0x55f6e82a8bf5736d46837246dcbeaf7e61b3c27c'
          
@@ -70,7 +61,7 @@ class EASOoDaoSync(Sync):
                         FROM 
                             auazure.eas_attestations_v2 eav
                         WHERE 
-                            topic3 = '0xc218b18af140c97644087c59e8ab35b981e73e026ffaf318f371c4ddc56efcb9'
+                            topic3 = '0x4468df37e17deb20b5096fb12107d4841b79ff6a62292e798eb7b79d0e764eb5'
                             AND decoded_attestation->>'proposal_id' = '{proposal_id}'
                         );"""
 
@@ -116,8 +107,8 @@ class EASOoDaoSync(Sync):
                                                 decoded_attestation->>'title' as title,
                                                 decoded_attestation->'startts' as startts,
                                                 decoded_attestation->>'description' as description,
-                                                decoded_attestation->'proposal_id' as proposal_id
-                                                from auazure."eas_attestations_v2" ocp WHERE topic3 = '0x12e8600c9bb57b5b436fa09735cfc63e95098552122001c465b610261eea8a93';""")
+                                                data as proposal_id
+                                                from auazure."eas_attestations_v2" ocp WHERE topic3 = '0x442d586d8424b5485de1ff46cb235dcb96b41d19834926bbad1cd157fbeeb8fc';""")
             return rows
 
     async def read_proposal_deletions(self):
@@ -188,7 +179,7 @@ class EASOoDaoSync(Sync):
                 skipped_count += 1
                 continue
 
-            votes = await self.read_votes_from_db(proposal_id)
+            votes = await self.read_votes_from_db(proposal_id, self.infra_dao_slug)
             num_of_votes = len(votes)
 
             # No new votes have come in, we can re-use the last tally
