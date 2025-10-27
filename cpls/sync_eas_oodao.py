@@ -4,6 +4,22 @@ from collections import defaultdict
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS, to_eth_address
 from .gcs import GCSClient
 
+OODAO = {
+   'INSTANTIATE' : '0x572f7d8834633948ea8827c710d08bbe9d80b87e8d7192185acb43b2af706dff',
+   'PERMA_INSTANTIATE' : '0x25566ed7860fc90849725cbd7b90e618a291685e9cb0d0b40d51bcf08538eec5',
+   'GRANT' : '0x3d3490aa99eca912f5ae133f02495e592c01e257e0a49f023fd9df6197dfc4ca',
+   'CREATE_PROPOSAL_TYPE' : '0xafc8d20711ca74a92a5c0ed26d7ca7796d2c78e20a17b76389f24c4dfbba54e5',
+   'CREATE_PROPOSAL' : '0x442d586d8424b5485de1ff46cb235dcb96b41d19834926bbad1cd157fbeeb8fc',
+   'CHECK_PROPOSAL' : '0xf022af215cd4eabc4bf1773d04fdec714f47097d9dc7a037eb01f23bdfaa5533',
+   'SET_PROPOSAL_TYPE' : '0x2e0208e92ffe9439d6ce12fbd9928ad8f6d79b652068bd3cf6032ef64dba12fa',
+   'SET_PARAM_VALUE' : '0x860fbb1b78677152aaea5cf8855866c268fde8c0d814c10f2a55d73d6562269c',
+   'DELEGATED_SIMPLE_VOTE' : '0xde80f2c4e6168c2f68c1b466087ffba7994c2b7ff8f4113689c75ee82ef59c61',
+   'DELEGATED_ADVANCED_VOTE' : '0x4aa210b34a3b488c54f7ec482763c5ec8a52be5669c24216d3814b009076fb50',
+   'SIMPLE_VOTE' : '0x2b0e624e00310c7e88a1b7840238e285152b38ab00160b14c0d4e54e0a53a3aa',
+   'ADVANCED_VOTE' : '0xa7497737b4bdc0eaf60e90a290602216fb2a0e8c886e50bad63324ca8b76a587',
+   'DELETE' : '0x28b4a65500ba66b7328de552b9e5cf7f2211143e141a4c8cf915ba894d8e81a8',
+}
+
 class EASOoDaoSync(Sync):
 
     SOURCE = 'eas-oodao'
@@ -18,7 +34,7 @@ class EASOoDaoSync(Sync):
     async def read_votes_direct_from_eas(self, proposal_id):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            qry = f"""select * from auazure."eas_attestations_v2" ocv WHERE topic3 in ('0xa68afde70897d2955e726c1a1da9e77ab466994b5da6666ceb518a5c538edc1e', '0x22e4a4e20f724e4162a553d076493d05d3edaff561c2708f67f4a23067074413') and decoded_attestation->'proposal_id' = '{proposal_id}';"""
+            qry = f"""select * from auazure."eas_attestations_v2" ocv WHERE topic3 in ('{OODAO['SIMPLE_VOTE']}', '{OODAO['ADVANCED_VOTE']}') and decoded_attestation->'proposal_id' = '{proposal_id}';"""
             print(qry)
             rows = await connection.fetch(qry)
             return rows
@@ -61,7 +77,7 @@ class EASOoDaoSync(Sync):
                         FROM 
                             auazure.eas_attestations_v2 eav
                         WHERE 
-                            topic3 = '0x4468df37e17deb20b5096fb12107d4841b79ff6a62292e798eb7b79d0e764eb5'
+                            topic3 = '{OODAO['CREATE_PROPOSAL_TYPE']}'
                             AND decoded_attestation->>'proposal_id' = '{proposal_id}'
                         );"""
 
@@ -72,14 +88,6 @@ class EASOoDaoSync(Sync):
             if row is None:
                 return None
             
-            row = json.loads(row['decoded_attestation'])
-            return row
-
-
-        qry = """select decoded_attestation from  auazure.eas_attestations_v2 where id = 'log_0x244535597e1f8670a380d7eab2cf4d94a1bb57b93d89fe4cfff50fafe998b104_141'""";
-        pool = await self.pg.connect()
-        async with pool.acquire() as connection:
-            row = await connection.fetchrow(qry)
             row = json.loads(row['decoded_attestation'])
             return row
         
@@ -108,7 +116,7 @@ class EASOoDaoSync(Sync):
                                                 decoded_attestation->'startts' as startts,
                                                 decoded_attestation->>'description' as description,
                                                 data as proposal_id
-                                                from auazure."eas_attestations_v2" ocp WHERE topic3 = '0x442d586d8424b5485de1ff46cb235dcb96b41d19834926bbad1cd157fbeeb8fc';""")
+                                                from auazure."eas_attestations_v2" ocp WHERE topic3 = '{OODAO['CREATE_PROPOSAL']}';""")
             return rows
 
     async def read_proposal_deletions(self):
