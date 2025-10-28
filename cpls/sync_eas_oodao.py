@@ -201,7 +201,7 @@ class EASOoDaoSync(Sync):
                 proposal['proposal_type_approval'] = 'ERROR'
                 proposal['default_proposal_type_ranges'] = default_type_ranges
 
-            proposal_type_name = proposal['proposal_type'].get('class')
+            proposal_type_name = proposal['proposal_type'].get('class', 'STANDARD')
             
             proposal['proposer'] = to_eth_address(proposal_meta['author'])
             proposal['proposer_ens'] = await self.bc.get_ens(proposal['proposer'])
