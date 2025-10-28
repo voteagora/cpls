@@ -77,7 +77,7 @@ class EASOoDaoSync(Sync):
                         FROM 
                             auazure.eas_attestations_v2 eav
                         WHERE 
-                            topic3 = '{OODAO['CREATE_PROPOSAL_TYPE']}'
+                            topic3 = '{OODAO['SET_PROPOSAL_TYPE']}'
                             AND decoded_attestation->>'proposal_id' = '{proposal_id}'
                         );"""
 
