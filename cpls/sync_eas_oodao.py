@@ -79,6 +79,7 @@ class EASOoDaoSync(Sync):
                         WHERE 
                             topic3 = '{OODAO['SET_PROPOSAL_TYPE']}'
                             AND decoded_attestation->>'proposal_id' = '{proposal_id}'
+                        ORDER BY attestation_time desc limit 1
                         );"""
 
         pool = await self.pg.connect()
