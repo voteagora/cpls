@@ -66,6 +66,32 @@ class EASOoDaoSync(Sync):
            
     async def read_proposal_type(self, proposal_id):
 
+        # KEEPING THIS LOGIC SEPERATE AND SYNC for now, to make it easier to debug and change.
+
+        qry = f"""SELECT 
+                    decoded_attestation
+                FROM 
+                    auazure.eas_attestations_v2 ea2
+                WHERE 
+                    data = (
+                        SELECT 
+                            ref_uid
+                        FROM 
+                            auazure.eas_attestations_v2 eav
+                        WHERE 
+                            data = '{proposal_id}'
+                        ORDER BY attestation_time desc limit 1
+                        );"""
+
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(qry)
+
+            if row is None:
+                authors_prop_type = None
+            else:
+                authors_prop_type = json.loads(row['decoded_attestation'])   
+
         qry = f"""SELECT 
                     decoded_attestation
                 FROM 
@@ -87,17 +113,11 @@ class EASOoDaoSync(Sync):
             row = await connection.fetchrow(qry)
 
             if row is None:
-                return None
-            
-            row = json.loads(row['decoded_attestation'])
-            return row
-        
-        # pool = await self.pg.connect()
-        # async with pool.acquire() as connection:
-        #    rows = await connection.fetch(f"""select decoded_attestation->>'proposal_type' from auazure."eas_attestations_v2" ocp WHERE 
-        #                                                  topic3 = '0xc218b18af140c97644087c59e8ab35b981e73e026ffaf318f371c4ddc56efcb9' and
-        #                                                  decoded_attestation->'proposal_id' = '{proposal_id}' order by block_number desc;""")
-        #    return rows
+                approved_prop_type = None
+            else:
+                approved_prop_type = json.loads(row['decoded_attestation'])
+
+        return authors_prop_type, approved_prop_type
     
     async def read_proposals(self):
 
@@ -167,15 +187,21 @@ class EASOoDaoSync(Sync):
 
             proposal['id'] = proposal_id
 
-            proposal_type = await self.read_proposal_type(proposal_id)
+            authors_prop_type, approved_prop_type = await self.read_proposal_type(proposal_id)
 
-            if proposal_type is None:
-                proposal_type_name = 'UNSET'
-                proposal_type = copy.deepcopy(default_type_ranges)
-            else:
-                proposal_type_name = proposal_type.get('class')
+            if approved_prop_type:
+                proposal['proposal_type'] = approved_prop_type
+                proposal['proposal_type_approval'] = 'APPROVED'
+            elif authors_prop_type:
+                proposal['proposal_type'] = authors_prop_type
+                proposal['proposal_type_approval'] = 'PENDING'
+                proposal['default_proposal_type_ranges'] = default_type_ranges
+            else: # Backwards compatibility only, will delete later this week.
+                proposal['proposal_type'] = {"name": "Unset Proposal Type", "class": "STANDARD", "quorum": 10000, "description": "This Proposal Type is Unset", "approval_threshold": 10000}
+                proposal['proposal_type_approval'] = 'ERROR'
+                proposal['default_proposal_type_ranges'] = default_type_ranges
 
-            proposal['proposal_type'] = proposal_type
+            proposal_type_name = proposal['proposal_type'].get('class')
             
             proposal['proposer'] = to_eth_address(proposal_meta['author'])
             proposal['proposer_ens'] = await self.bc.get_ens(proposal['proposer'])
