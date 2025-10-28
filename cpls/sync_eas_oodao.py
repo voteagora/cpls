@@ -243,7 +243,7 @@ class EASOoDaoSync(Sync):
                     for key in outcome['token-holders'].keys():
                         outcome['token-holders'][key] = str(outcome['token-holders'][key])
 
-                elif proposal_type == 'APPROVAL': 
+                elif proposal_type_name == 'APPROVAL': 
                     raise NotImplementedError("Approval Types are Not implemented yet.")
                 else:
                     raise NotImplementedError(f"Proposal Type {proposal_type_name} is not implemented yet.")
@@ -298,7 +298,7 @@ class EASOoDaoSync(Sync):
                     passing_approval_threshold = (proposal['proposal_type']['approval_threshold'] / 10000) * int(proposal['total_voting_power_at_start'])
                     
                     quorum_check = passing_quorum > sum([int(weight) for weight in proposal['outcome']['token-holders'].values()])
-                    approval_check = passing_approval_threshold > proposal['outcome']['token-holders'][1]
+                    approval_check = passing_approval_threshold > proposal['outcome']['token-holders'].get(1, 0)
 
                     proposal['quorum_check'] = quorum_check
                     proposal['approval_check'] = approval_check
