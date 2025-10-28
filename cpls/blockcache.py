@@ -8,7 +8,7 @@ class BlockCacheClient:
     def __init__(self, base_url, alchemy_api_key):
         self.base_url = base_url
         self.alchemy_api_key = alchemy_api_key
-        self.client = httpx.AsyncClient()
+        self.client = httpx.AsyncClient(timeout=30.0)
 
     def headers(self):
         return {'alchemy-api-key': self.alchemy_api_key} 
