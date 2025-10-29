@@ -69,6 +69,7 @@ class EASOoDaoSync(Sync):
         # KEEPING THIS LOGIC SEPERATE AND SYNC for now, to make it easier to debug and change.
 
         qry = f"""SELECT 
+                    data,
                     decoded_attestation
                 FROM 
                     auazure.eas_attestations_v2 ea2
@@ -91,8 +92,10 @@ class EASOoDaoSync(Sync):
                 authors_prop_type = None
             else:
                 authors_prop_type = json.loads(row['decoded_attestation'])   
+                authors_prop_type['eas_uid'] = row['data']
 
         qry = f"""SELECT 
+                    data,
                     decoded_attestation
                 FROM 
                     auazure.eas_attestations_v2 ea2
@@ -116,6 +119,7 @@ class EASOoDaoSync(Sync):
                 approved_prop_type = None
             else:
                 approved_prop_type = json.loads(row['decoded_attestation'])
+                approved_prop_type['eas_uid'] = row['data']
 
         return authors_prop_type, approved_prop_type
     
@@ -203,7 +207,7 @@ class EASOoDaoSync(Sync):
                 proposal['proposal_type_approval'] = 'PENDING'
                 proposal['default_proposal_type_ranges'] = default_type_ranges
             else: # Backwards compatibility only, will delete later this week.
-                proposal['proposal_type'] = {"name": "Unset Proposal Type", "class": "STANDARD", "quorum": 10000, "description": "This Proposal Type is Unset", "approval_threshold": 10000}
+                proposal['proposal_type'] = {"eas_uid": '0x0',"name": "Unset Proposal Type", "class": "STANDARD", "quorum": 10000, "description": "This Proposal Type is Unset", "approval_threshold": 10000}
                 proposal['proposal_type_approval'] = 'ERROR'
                 proposal['default_proposal_type_ranges'] = default_type_ranges
 
@@ -343,5 +347,4 @@ class EASOoDaoSync(Sync):
             'skipped': skipped_count,
             'refreshed': refreshed_count
         }
-
 
