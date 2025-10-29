@@ -189,8 +189,13 @@ class EASOoDaoSync(Sync):
 
             authors_prop_type, approved_prop_type = await self.read_proposal_type(proposal_id)
 
+            assert isinstance(proposal['tags'], list), "Expected tags to be a list, but got %s" % type(proposal['tags'])
+            
             if approved_prop_type:
                 proposal['proposal_type'] = approved_prop_type
+                proposal['proposal_type_approval'] = 'APPROVED'
+            elif authors_prop_type and ('gov-proposal' in proposal['tags']):
+                proposal['proposal_type'] = authors_prop_type
                 proposal['proposal_type_approval'] = 'APPROVED'
             elif authors_prop_type:
                 proposal['proposal_type'] = authors_prop_type
