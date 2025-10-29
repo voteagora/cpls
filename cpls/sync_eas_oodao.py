@@ -189,8 +189,9 @@ class EASOoDaoSync(Sync):
 
             authors_prop_type, approved_prop_type = await self.read_proposal_type(proposal_id)
 
+            proposal['tags'] = proposal['tags'].split(',')
             assert isinstance(proposal['tags'], list), "Expected tags to be a list, but got %s" % type(proposal['tags'])
-            
+
             if approved_prop_type:
                 proposal['proposal_type'] = approved_prop_type
                 proposal['proposal_type_approval'] = 'APPROVED'
@@ -254,7 +255,6 @@ class EASOoDaoSync(Sync):
                     raise NotImplementedError(f"Proposal Type {proposal_type_name} is not implemented yet.")
 
             proposal['outcome'] = outcome
-            proposal['tags'] = proposal['tags'].split(',')
 
 
         
