@@ -27,7 +27,7 @@ class EASOoDaoSync(Sync):
     async def read_votes_from_db(self, proposal_id, dao_slug):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            qry = f"""select support, weight from {dao_slug}.votes where proposal_id = '{proposal_id}';"""
+            qry = f"""select transaction_hash, block_number, chain_id, voter, support, weight, ts from {dao_slug}.votes where proposal_id = '{proposal_id}';"""
             rows = await connection.fetch(qry)
             return rows
 
@@ -63,7 +63,23 @@ class EASOoDaoSync(Sync):
         async with pool.acquire() as connection:
             row = await connection.fetchrow(f"""select {dao_slug}.get_voting_power_at_block('{delegate}', {block_number}, '{token}') as voting_power;""")
             return int(row['voting_power'])
-           
+    
+    async def get_vp_snapshot_all_delegates(self, chain_id, block_number, dao_slug):
+
+        token = '0x55f6e82a8bf5736d46837246dcbeaf7e61b3c27c'
+
+        qry = f"""select distinct on (delegate) delegate, block_number, new_votes 
+                    from auazure.multi_synd_token_delegate_votes_changed 
+                    where chain_id = {chain_id} 
+                    and address = '{token}' 
+                    and block_number <= {block_number}
+                ORDER BY delegate, block_number desc"""
+         
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(qry)
+            return rows
+
     async def read_proposal_type(self, proposal_id):
 
         # KEEPING THIS LOGIC SEPERATE AND SYNC for now, to make it easier to debug and change.
@@ -163,6 +179,7 @@ class EASOoDaoSync(Sync):
 
     async def refresh_list(self, gcs_client: 'GCSClient'):
 
+        self.bc.clear_lru()
 
         ######################################
         # Step 1 - Get a list of recent-ish proposals.  Think either the "full list of any proposal ever" OR "just stuff that may or may not be ready to archive"
@@ -214,7 +231,7 @@ class EASOoDaoSync(Sync):
             proposal_type_name = proposal['proposal_type'].get('class', 'STANDARD')
             
             proposal['proposer'] = to_eth_address(proposal_meta['author'])
-            proposal['proposer_ens'] = await self.bc.get_ens(proposal['proposer'])
+            proposal['proposer_ens'] = await self.bc.get_ens_lru(proposal['proposer'])
             del proposal['author']            
 
             try:
@@ -228,8 +245,7 @@ class EASOoDaoSync(Sync):
             num_of_votes = len(votes)
 
             # No new votes have come in, we can re-use the last tally
-            reuse_tally = existing_num_of_votes > 0 and (existing_num_of_votes == num_of_votes)
-
+            reuse_tally = existing_num_of_votes > 0 and (existing_num_of_votes == num_of_votes) and (not self.reset)
             proposal['num_of_votes'] = num_of_votes
 
             if reuse_tally:
@@ -241,17 +257,40 @@ class EASOoDaoSync(Sync):
 
                     outcome = defaultdict(lambda: defaultdict(int))
 
+                    votes_out = []
+                    vote_set = []
+
                     for vote in votes:
 
+                        copy_of_vote = copy.deepcopy(dict(vote))
+                        copy_of_vote['weight'] = str(int(vote['weight']))
+
+                        vote_set.append(copy_of_vote['voter'])
+
+                        copy_of_vote['ens'] = await self.bc.get_ens_lru(vote['voter'])
+
+                        if copy_of_vote['ens'] is None:
+                            del copy_of_vote['ens']
+
+                        copy_of_vote['x'] = None
+                        copy_of_vote['warpcast'] = None
+                        copy_of_vote['discord'] = None
+
                         outcome['token-holders'][vote['support']] += int(vote['weight']) 
+
+                        votes_out.append(copy_of_vote)
 
                         # vote_att = json.loads(vote['decoded_attestation']) #vote['decoded_attestation']
                         # print(vote)
                         # choice = vote_att['choice']
                         # outcome['token-holders'][choice] += await self.read_snapshot_voting_power(vote['voter'], vote['block_number'], self.infra_dao_slug)
                 
+                    vote_set = set(vote_set)
+
                     for key in outcome['token-holders'].keys():
                         outcome['token-holders'][key] = str(outcome['token-holders'][key])
+
+                    await self.overwrite_votes(votes_out, proposal_id, gcs_client)
 
                 elif proposal_type_name == 'APPROVAL': 
                     raise NotImplementedError("Approval Types are Not implemented yet.")
@@ -260,8 +299,6 @@ class EASOoDaoSync(Sync):
 
             proposal['outcome'] = outcome
 
-
-        
             try:
                 proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
             except SkipProposal as e:
@@ -287,6 +324,30 @@ class EASOoDaoSync(Sync):
 
             if start_block > 0:
                 proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block, self.infra_dao_slug))
+
+                if not reuse_tally:
+                    snapshot_vp = await self.get_vp_snapshot_all_delegates(11155111, start_block, 'SYNDICATE')
+
+                    snapshot_vp_out = []
+                    for row in snapshot_vp:
+
+                        if (row['delegate'] not in vote_set) and int(row['new_votes']) > 0:
+                            record = {
+                                'addr': row['delegate'],
+                                'bn': row['block_number'],
+                                'vp': row['new_votes'],
+                                'ens': await self.bc.get_ens_lru(row['delegate']),
+                                'x': None,
+                                'warpcast': None,
+                                'discord': None
+                            }
+                        
+                            if record['ens'] is None:
+                                del record['ens']
+                            
+                            snapshot_vp_out.append(record)
+
+                    await self.overwrite_hasnt_voted(snapshot_vp_out, proposal_id, gcs_client)
             
             if 'delete_event' in proposal:
                 proposal['lifecycle_stage'] = 'CANCELLED'

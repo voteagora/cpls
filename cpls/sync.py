@@ -113,9 +113,16 @@ class Sync:
 
     def proposal_blob_name(self, proposal_id):
         return f"data/{self.infra_dao_slug}/proposal/{self.SOURCE}/raw/{proposal_id}.json"
+    
+    def votes_blob_name(self, proposal_id):
+        return f"data/{self.infra_dao_slug}/votes/{proposal_id}.ndjson"
+    
+    def hasnt_voted_blob_name(self, proposal_id):
+        return f"data/{self.infra_dao_slug}/hasnt_voted/{proposal_id}.ndjson"
 
     def calculate_proposal_hash(self, proposal):
         return json_hash(proposal)
+    
     
     def check_existing_proposal_hash(self, proposal, existing_proposal_hash):
 
@@ -167,6 +174,19 @@ class Sync:
         blocktime = await self.bc.get_blocktime(chain_id, block_number)
         return blocktime
     
+    async def overwrite_votes(self, votes, proposal_id, gcs_client: 'GCSClient'):
+
+        blob_name = self.votes_blob_name(proposal_id)
+
+        await gcs_client.upload_ndjson(votes, blob_name)
+
+    async def overwrite_hasnt_voted(self, hasnt_voted, proposal_id, gcs_client: 'GCSClient'):
+
+        blob_name = self.hasnt_voted_blob_name(proposal_id)
+
+        await gcs_client.upload_ndjson(hasnt_voted, blob_name)
+    
+
     async def overwrite_proposal(self, proposal, proposal_hash, liveness, gcs_client: 'GCSClient'):
 
         if proposal_hash is None:
@@ -194,7 +214,6 @@ class Sync:
         blob_name = self.proposal_blob_name(proposal['id'])
         
         await gcs_client.upload_dict(proposal, blob_name, metadata=metadata, cache_control=cache_contr)
-
 
 if __name__ == "__main__":
 

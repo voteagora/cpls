@@ -1,5 +1,6 @@
 import httpx
 from eth_abi import encode
+import copy
 
 class BlockNotFound(Exception):
     pass
@@ -9,6 +10,10 @@ class BlockCacheClient:
         self.base_url = base_url
         self.alchemy_api_key = alchemy_api_key
         self.client = httpx.AsyncClient(timeout=30.0)
+        self.cached_ens = {}
+
+    def clear_lru(self):
+        self.cached_ens = {}
 
     def headers(self):
         return {'alchemy-api-key': self.alchemy_api_key} 
@@ -60,6 +65,21 @@ class BlockCacheClient:
         else:
             data = resp.json()
             return data
+    
+    async def get_ens_lru(self, address, chain_id=1):
+
+        cache_key = str([address, chain_id])
+
+        cached_ens = self.cached_ens.get(cache_key, None)
+
+        if cached_ens:
+            return cached_ens
+
+        ans = await self.get_ens(address, chain_id)
+
+        self.cached_ens[cache_key] = copy.deepcopy(ans)
+
+        return ans
     
     async def get_decoded_eas(self, chain_id, attestation_id):
 
