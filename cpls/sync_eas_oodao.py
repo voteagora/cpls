@@ -419,8 +419,8 @@ class EASOoDaoSync(Sync):
                     passing_quorum = (proposal['proposal_type']['quorum'] / 10000) * int(proposal['total_voting_power_at_start'])
                     passing_approval_threshold = (proposal['proposal_type']['approval_threshold'] / 10000) * int(proposal['total_voting_power_at_start'])
                     
-                    quorum_check = passing_quorum > sum([int(weight) for weight in proposal['outcome']['token-holders'].values()])
-                    approval_check = passing_approval_threshold > proposal['outcome']['token-holders'].get(1, 0)
+                    quorum_check = sum([int(weight) for weight in proposal['outcome']['token-holders'].values()]) >= passing_quorum
+                    approval_check = int(proposal['outcome']['token-holders'].get(1, 0)) >= passing_approval_threshold
 
                     proposal['quorum_check'] = quorum_check
                     proposal['approval_check'] = approval_check
