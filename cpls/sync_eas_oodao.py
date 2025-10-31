@@ -80,6 +80,36 @@ class EASOoDaoSync(Sync):
             rows = await connection.fetch(qry)
             return rows
 
+
+    async def get_delegate_metadata(self):
+
+        dao_slug = 'SYNDICATE'
+
+        qry = f"""select distinct on(address) address,
+                                              discord, 
+                                              twitter as x, 
+                                              warpcast 
+                    from agora.delegate_statements mstdc 
+                    where "dao_slug" = '{dao_slug}' 
+                    and (LENGTH(discord) > 2 or LENGTH(twitter) > 2 or LENGTH(warpcast) > 2) 
+                    order by address, updated_at_ts desc"""
+         
+        pool = await self.pg.connect()
+
+        out = {}
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(qry)
+
+            for row in rows:
+                addr = row['address'].lower()
+                out[addr] = {}
+
+                for platform in ['warpcast', 'x', 'discord']:
+                    if (row[platform] is not None):
+                        out[addr][platform] = row[platform]
+
+            return out
+
     async def read_proposal_type(self, proposal_id):
 
         # KEEPING THIS LOGIC SEPERATE AND SYNC for now, to make it easier to debug and change.
@@ -180,6 +210,7 @@ class EASOoDaoSync(Sync):
     async def refresh_list(self, gcs_client: 'GCSClient'):
 
         self.bc.clear_lru()
+        self.delegate_metadata = None
 
         ######################################
         # Step 1 - Get a list of recent-ish proposals.  Think either the "full list of any proposal ever" OR "just stuff that may or may not be ready to archive"
@@ -253,6 +284,10 @@ class EASOoDaoSync(Sync):
                 outcome = existing_proposal_data['outcome']
             
             else:
+
+                if self.delegate_metadata is None:
+                    self.delegate_metadata = await self.get_delegate_metadata()
+
                 if proposal_type_name in ('UNSET', 'OPTIMISTIC', 'STANDARD'):
 
                     outcome = defaultdict(lambda: defaultdict(int))
@@ -267,14 +302,17 @@ class EASOoDaoSync(Sync):
 
                         vote_set.append(copy_of_vote['voter'])
 
-                        copy_of_vote['ens'] = await self.bc.get_ens_lru(vote['voter'])
+                        addr = vote['voter'].lower()
 
-                        if copy_of_vote['ens'] is None:
-                            del copy_of_vote['ens']
+                        try: # This isn't great, but 1 in 1000 calls seems to fail, and break the pipeline. 
+                             # TODO - fix and remove.
+                            copy_of_vote['ens'] = await self.bc.get_ens_lru(addr)
+                        except:
+                            pass
 
-                        copy_of_vote['x'] = None
-                        copy_of_vote['warpcast'] = None
-                        copy_of_vote['discord'] = None
+                        delegate_meta = self.delegate_metadata.get(addr, {})
+
+                        copy_of_vote.update(delegate_meta)
 
                         outcome['token-holders'][vote['support']] += int(vote['weight']) 
 
@@ -325,6 +363,9 @@ class EASOoDaoSync(Sync):
             if start_block > 0:
                 proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block, self.infra_dao_slug))
 
+                if self.delegate_metadata is None:
+                    self.delegate_metadata = await self.get_delegate_metadata()
+
                 if not reuse_tally:
                     snapshot_vp = await self.get_vp_snapshot_all_delegates(11155111, start_block, 'SYNDICATE')
 
@@ -332,20 +373,27 @@ class EASOoDaoSync(Sync):
                     for row in snapshot_vp:
 
                         if (row['delegate'] not in vote_set) and int(row['new_votes']) > 0:
+
+                            addr = row['delegate'].lower()
                             record = {
-                                'addr': row['delegate'],
+                                'addr': addr,
                                 'bn': row['block_number'],
-                                'vp': row['new_votes'],
-                                'ens': await self.bc.get_ens_lru(row['delegate']),
-                                'x': None,
-                                'warpcast': None,
-                                'discord': None
-                            }
-                        
-                            if record['ens'] is None:
-                                del record['ens']
+                                'vp': row['new_votes']
+                                }
                             
-                            snapshot_vp_out.append(record)
+                            try:
+                                ens = await self.bc.get_ens_lru(addr)
+                                if ens is not None:
+                                    record['ens'] = ens
+                            except:
+                                pass
+
+                            delegate_metadata = self.delegate_metadata.get(addr, {})
+
+                            record.update(delegate_metadata)
+                            
+                            snapshot_vp_out.append(record)                        
+
 
                     await self.overwrite_hasnt_voted(snapshot_vp_out, proposal_id, gcs_client)
             
