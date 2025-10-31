@@ -262,7 +262,11 @@ class EASOoDaoSync(Sync):
             proposal_type_name = proposal['proposal_type'].get('class', 'STANDARD')
             
             proposal['proposer'] = to_eth_address(proposal_meta['author'])
-            proposal['proposer_ens'] = await self.bc.get_ens_lru(proposal['proposer'])
+            try:
+                proposal['proposer_ens'] = await self.bc.get_ens_lru(proposal['proposer'])
+            except:
+                pass
+            proposal['proposer_ens'] = None
             del proposal['author']            
 
             try:
