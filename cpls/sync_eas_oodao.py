@@ -26,16 +26,21 @@ class EASOoDaoSync(Sync):
 
     def __init__(self, infra_dao_slug, config=None, reset=False):
 
-        super().__init__(infra_dao_slug, config, reset)
+        super().__init__(self, infra_dao_slug, config, reset)
 
-        self.oodao_dao_id = self.config['oodao']['address']
-        self.oodao_chain_id = self.config['oodao']['chain_id']
+        try:
 
-        self.token_addr = self.config['token']['address']
-        self.token_chain_id = self.config['token']['chain_id']
+            self.oodao_dao_id = self.config['oodao']['address']
+            self.oodao_chain_id = self.config['oodao']['chain_id']
 
-        self.dao_slug = self.config['dao_slug'] # This is the capitals one, in the DB.  infra_dao_slug is the lowercase one that matches the DB schema and tenants config file names.
+            self.token_addr = self.config['token']['address']
+            self.token_chain_id = self.config['token']['chain_id']
 
+            self.dao_slug = self.config['dao_slug'] # This is the capitals one, in the DB.  infra_dao_slug is the lowercase one that matches the DB schema and tenants config file names.
+
+        except:
+            raise Exception(f'problem with config: {self.config}')
+    
     async def read_votes_from_db(self, proposal_id):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
