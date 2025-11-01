@@ -26,7 +26,7 @@ class EASOoDaoSync(Sync):
 
     def __init__(self, infra_dao_slug, config=None, reset=False):
 
-        super().__init__(config, reset)
+        super().__init__(infra_dao_slug, config, reset)
 
         self.oodao_dao_id = self.config['oodao']['address']
         self.oodao_chain_id = self.config['oodao']['chain_id']
