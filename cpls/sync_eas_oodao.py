@@ -199,7 +199,7 @@ class EASOoDaoSync(Sync):
                                                 decoded_attestation->'startts' as startts,
                                                 decoded_attestation->>'description' as description,
                                                 data as proposal_id
-                                                from auazure."eas_attestations_v2" ocp WHERE topic3 = '{OODAO['CREATE_PROPOSAL']}' and topic1_cropped == '{self.oodao_dao_id}';""")
+                                                from auazure."eas_attestations_v2" ocp WHERE topic3 = '{OODAO['CREATE_PROPOSAL']}' and topic1_cropped = '{self.oodao_dao_id}';""")
             return rows
 
     async def read_proposal_deletions(self):
@@ -216,7 +216,7 @@ class EASOoDaoSync(Sync):
                                                 chain_id,
                                                 ref_uid,
                                                 attestation_time
-                                                from auazure."eas_attestations_v2" ocp WHERE decoded_attestation->>'verb' = 'CREATE_PROPOSAL' and topic1_cropped == '{self.oodao_dao_id}';""")
+                                                from auazure."eas_attestations_v2" ocp WHERE decoded_attestation->>'verb' = 'CREATE_PROPOSAL' and topic1_cropped = '{self.oodao_dao_id}';""")
             return rows
 
     async def refresh_list(self, gcs_client: 'GCSClient'):
