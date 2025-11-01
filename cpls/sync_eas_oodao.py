@@ -34,7 +34,7 @@ class EASOoDaoSync(Sync):
             self.oodao_chain_id = self.config['deployment']['oodao']['chain_id']
 
             self.token_addr = self.config['deployment']['token']['address']
-            self.token_chain_id = self.config['deployment']['token']['chain_id']
+            self.token_chain_id = self.config['deployment']['chain_id']
 
             self.dao_slug = self.config['dao_slug'] # This is the capitals one, in the DB.  infra_dao_slug is the lowercase one that matches the DB schema and tenants config file names.
 
