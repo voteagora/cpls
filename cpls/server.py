@@ -75,7 +75,7 @@ async def lifespan(app_instance: FastAPI):
 
         config = copy.copy(tenants_config[infra_dao_slug])
 
-        assert config['infra_dao_slug'] == config['schema']
+        assert infra_dao_slug == config['schema']
 
         scheduler.add_job(
             scheduled_job,
