@@ -82,8 +82,7 @@ async def lifespan(app_instance: FastAPI):
             minutes=SCHEDULER_INTERVAL_MINUTES,
             id='scheduled_job-' + infra_dao_slug,
             max_instances=1,
-            config=config,
-            infra_dao_slug=infra_dao_slug
+            kwargs = {'config' : config, 'infra_dao_slug' : infra_dao_slug}
         )
 
     scheduler.start()
