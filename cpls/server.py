@@ -74,8 +74,7 @@ async def lifespan(app_instance: FastAPI):
     for infra_dao_slug in INFRA_DAO_SLUGS:
         # Configure scheduler to run at specified interval
 
-        kwargs = copy.copy(tenants_config[infra_dao_slug])
-        kwargs['infra_dao_slug'] = infra_dao_slug
+        config = copy.copy(tenants_config[infra_dao_slug])
 
         scheduler.add_job(
             scheduled_job,
@@ -83,7 +82,8 @@ async def lifespan(app_instance: FastAPI):
             minutes=SCHEDULER_INTERVAL_MINUTES,
             id='scheduled_job-' + infra_dao_slug,
             max_instances=1,
-            kwargs=kwargs
+            config=config,
+            infra_dao_slug=infra_dao_slug
         )
 
     scheduler.start()
