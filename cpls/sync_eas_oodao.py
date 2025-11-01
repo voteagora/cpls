@@ -57,11 +57,11 @@ class EASOoDaoSync(Sync):
             rows = await connection.fetch(qry)
             return rows
 
-    async def read_proposal_type_range(self, dao_slug):
+    async def read_proposal_type_range(self):
 
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            row = await connection.fetchrow(f"""select min(quorum::numeric)::text min_quorum_pct, max(quorum::numeric)::text max_quorum_pct, min(approval_threshold::numeric)::text min_approval_threshold_pct, max(approval_threshold::numeric)::text max_approval_threshold_pct from {dao_slug}.proposal_types where contract = '{self.oodao_dao_id}';""")
+            row = await connection.fetchrow(f"""select min(quorum::numeric)::text min_quorum_pct, max(quorum::numeric)::text max_quorum_pct, min(approval_threshold::numeric)::text min_approval_threshold_pct, max(approval_threshold::numeric)::text max_approval_threshold_pct from {self.infra_dao_slug}.proposal_types where contract = '{self.oodao_dao_id}';""")
             return row
         
     async def read_snapshot_votable_supply(self, block_number):
