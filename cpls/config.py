@@ -18,6 +18,7 @@ BLOCKCACHE_URL = os.getenv("BLOCKCACHE_URL", 'https://blockcache-production.up.r
 DATABASE_URL = os.getenv("DATABASE_URL", '')
 WRITE_TO_DISK = ENVIRONMENT == 'dev'
 TENANTS_CONFIG_PATH = Path(os.getenv("TENANT_CONFIG_PATH", '/config/envs/prod'))
+DEPLOYMENT = os.getenv("DEPLOYMENT", "main")
 
 
 def load_tenant_configs():
@@ -35,6 +36,15 @@ def load_tenant_configs():
         try:
             with open(yaml_file, 'r') as f:
                 config_data = yaml.safe_load(f)
+
+                if DEPLOYMENT not in config_data['deployments']:
+                    print(f"Warning: Deployment {DEPLOYMENT} not found in {yaml_file}, skipping.")
+                    continue
+
+                deployment = config_data['deployments'][DEPLOYMENT]
+                del config_data['deployments']
+                config_data['deployment'] = deployment
+
                 # Use filename without extension as the key (e.g., 'optimism', 'scroll')
                 tenant_slug = yaml_file.stem
                 tenant_configs[tenant_slug] = config_data
@@ -43,3 +53,8 @@ def load_tenant_configs():
             print(f"Error loading {yaml_file}: {e}")
 
     return tenant_configs
+
+# TODO refactor this to invert it.  We we should be calling this method
+def load_tenant_config(dao_infra_slug):
+    configs = load_tenant_configs()
+    return configs[dao_infra_slug]

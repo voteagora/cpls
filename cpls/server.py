@@ -31,14 +31,13 @@ gcs_client = GCSClient(GCS_BUCKET_NAME)
 async def scheduled_job(config: Dict, infra_dao_slug: str):
     """Function to be called by the scheduler periodically"""
 
-    if infra_dao_slug == 'optimism':
-        sources = ['dao_node', 'eas-atlas']
-    elif infra_dao_slug == 'syndicate':
+
+    if config['features'].get('oodao', False):
         sources = ['eas-oodao']
-    elif infra_dao_slug in ('scroll', 'cyber', 'pguild'):
-        sources = ['dao_node']
+    elif infra_dao_slug == 'optimism':
+        sources =['dao_node', 'eas-atlas']
     else:
-        raise Exception(f"Unknown infra_dao_slug: {infra_dao_slug}")
+        sources =['dao_node']
 
     job_id = await job_queue.add_job(
         job_type="scheduled",
@@ -75,6 +74,8 @@ async def lifespan(app_instance: FastAPI):
         # Configure scheduler to run at specified interval
 
         config = copy.copy(tenants_config[infra_dao_slug])
+
+        assert config['infra_dao_slug'] == config['schema']
 
         scheduler.add_job(
             scheduled_job,

@@ -3,7 +3,7 @@ from .gcs import GCSClient
 from .postgres import PostgreSQLClient
 from .blockcache import BlockCacheClient
 
-from .config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY, DATABASE_URL, BLOCKCACHE_URL
+from .config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY, DATABASE_URL, BLOCKCACHE_URL, load_tenant_config
 
 import hashlib
 import json
@@ -41,9 +41,14 @@ class SkipProposal(Exception):
         return f"[PROP-{self.proposal_id}] {self.reason}"
 
 class Sync:
-    def __init__(self, infra_dao_slug, reset=False):
+    def __init__(self, infra_dao_slug, config=None, reset=False):
 
         self.infra_dao_slug = infra_dao_slug
+
+        if config is None:
+            config = load_tenant_config(infra_dao_slug)
+
+        self.config = config
         self.reset = reset
 
         self.pg = PostgreSQLClient(DATABASE_URL)
@@ -201,11 +206,7 @@ class Sync:
         metadata = {'proposal_id': proposal['id']}
         metadata.update(data_eng_properties)
 
-        # TODO-bomb, to come back and finis the other sources to support num_of_votes
-        if time.time() > 1764125888:
-            metadata['num_of_votes'] = proposal.get['num_of_votes']
-        else:
-            metadata['num_of_votes'] = proposal.get('num_of_votes', 0)
+        metadata['num_of_votes'] = proposal.get('num_of_votes', 0)
 
         proposal['data_eng_properties'] = data_eng_properties
     

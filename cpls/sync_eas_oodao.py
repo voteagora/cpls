@@ -24,18 +24,31 @@ class EASOoDaoSync(Sync):
 
     SOURCE = 'eas-oodao'
 
-    async def read_votes_from_db(self, proposal_id, dao_slug):
+    def __init__(self, infra_dao_slug, config=None, reset=False):
+
+        super().__init__(config, reset)
+
+        self.oodao_dao_id = self.config['oodao']['address']
+        self.oodao_chain_id = self.config['oodao']['chain_id']
+
+        self.token_addr = self.config['token']['address']
+        self.token_chain_id = self.config['token']['chain_id']
+
+        self.dao_slug = self.config['dao_slug'] # This is the capitals one, in the DB.  infra_dao_slug is the lowercase one that matches the DB schema and tenants config file names.
+
+    async def read_votes_from_db(self, proposal_id):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            qry = f"""select transaction_hash, block_number, chain_id, voter, support, weight, ts from {dao_slug}.votes where proposal_id = '{proposal_id}';"""
+            # No need to contract scope this, because the proposal_id is unique
+            qry = f"""select transaction_hash, block_number, chain_id, voter, support, weight, ts from {self.infra_dao_slug}.votes where proposal_id = '{proposal_id}';"""
             rows = await connection.fetch(qry)
             return rows
 
     async def read_votes_direct_from_eas(self, proposal_id):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
+            # No need to contract scope this, because the proposal_id is unique
             qry = f"""select * from auazure."eas_attestations_v2" ocv WHERE topic3 in ('{OODAO['SIMPLE_VOTE']}', '{OODAO['ADVANCED_VOTE']}') and decoded_attestation->'proposal_id' = '{proposal_id}';"""
-            print(qry)
             rows = await connection.fetch(qry)
             return rows
 
@@ -43,35 +56,31 @@ class EASOoDaoSync(Sync):
 
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            row = await connection.fetchrow(f"""select min(quorum::numeric)::text min_quorum_pct, max(quorum::numeric)::text max_quorum_pct, min(approval_threshold::numeric)::text min_approval_threshold_pct, max(approval_threshold::numeric)::text max_approval_threshold_pct from {dao_slug}.proposal_types;""")
+            row = await connection.fetchrow(f"""select min(quorum::numeric)::text min_quorum_pct, max(quorum::numeric)::text max_quorum_pct, min(approval_threshold::numeric)::text min_approval_threshold_pct, max(approval_threshold::numeric)::text max_approval_threshold_pct from {dao_slug}.proposal_types where contract = '{self.oodao_dao_id}';""")
             return row
         
-    async def read_snapshot_votable_supply(self, block_number, dao_slug):
+    async def read_snapshot_votable_supply(self, block_number):
 
-        token = '0x55f6e82a8bf5736d46837246dcbeaf7e61b3c27c'
-         
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            row = await connection.fetchrow(f"""select {dao_slug}.get_votable_supply_at_block({block_number}, '{token}') as votable_supply;""")
+
+            # This only works if the token has a different address on different chains.
+            row = await connection.fetchrow(f"""select {self.infra_dao_slug}.get_votable_supply_at_block({block_number}, '{self.token_addr}') as votable_supply;""")
             return int(row['votable_supply'])
 
-    async def read_snapshot_voting_power(self, delegate, block_number, dao_slug):
+    async def read_snapshot_voting_power(self, delegate, block_number):
 
-        token = '0x55f6e82a8bf5736d46837246dcbeaf7e61b3c27c'
-         
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            row = await connection.fetchrow(f"""select {dao_slug}.get_voting_power_at_block('{delegate}', {block_number}, '{token}') as voting_power;""")
+            row = await connection.fetchrow(f"""select {self.infra_dao_slug}.get_voting_power_at_block('{delegate}', {block_number}, '{self.token_addr}') as voting_power;""")
             return int(row['voting_power'])
     
-    async def get_vp_snapshot_all_delegates(self, chain_id, block_number, dao_slug):
-
-        token = '0x55f6e82a8bf5736d46837246dcbeaf7e61b3c27c'
+    async def get_vp_snapshot_all_delegates(self, block_number):
 
         qry = f"""select distinct on (delegate) delegate, block_number, new_votes 
                     from auazure.multi_synd_token_delegate_votes_changed 
-                    where chain_id = {chain_id} 
-                    and address = '{token}' 
+                    where
+                    and address = '{self.token_addr}' 
                     and block_number <= {block_number}
                 ORDER BY delegate, block_number desc"""
          
@@ -83,14 +92,12 @@ class EASOoDaoSync(Sync):
 
     async def get_delegate_metadata(self):
 
-        dao_slug = 'SYNDICATE'
-
         qry = f"""select distinct on(address) address,
                                               discord, 
                                               twitter as x, 
                                               warpcast 
                     from agora.delegate_statements mstdc 
-                    where "dao_slug" = '{dao_slug}' 
+                    where "dao_slug" = '{self.dao_slug}' 
                     and (LENGTH(discord) > 2 or LENGTH(twitter) > 2 or LENGTH(warpcast) > 2) 
                     order by address, updated_at_ts desc"""
          
@@ -187,7 +194,7 @@ class EASOoDaoSync(Sync):
                                                 decoded_attestation->'startts' as startts,
                                                 decoded_attestation->>'description' as description,
                                                 data as proposal_id
-                                                from auazure."eas_attestations_v2" ocp WHERE topic3 = '{OODAO['CREATE_PROPOSAL']}';""")
+                                                from auazure."eas_attestations_v2" ocp WHERE topic3 = '{OODAO['CREATE_PROPOSAL']}' and topic1_cropped == '{self.oodao_dao_id}';""")
             return rows
 
     async def read_proposal_deletions(self):
@@ -204,7 +211,7 @@ class EASOoDaoSync(Sync):
                                                 chain_id,
                                                 ref_uid,
                                                 attestation_time
-                                                from auazure."eas_attestations_v2" ocp WHERE decoded_attestation->>'verb' = 'CREATE_PROPOSAL';""")
+                                                from auazure."eas_attestations_v2" ocp WHERE decoded_attestation->>'verb' = 'CREATE_PROPOSAL' and topic1_cropped == '{self.oodao_dao_id}';""")
             return rows
 
     async def refresh_list(self, gcs_client: 'GCSClient'):
@@ -221,7 +228,7 @@ class EASOoDaoSync(Sync):
 
         deletions = {row['ref_uid'] : dict(row) for row in deletions}
 
-        default_type_ranges = await self.read_proposal_type_range(self.infra_dao_slug)
+        default_type_ranges = await self.read_proposal_type_range()
         default_type_ranges = {k : int(v) for k, v in default_type_ranges.items() if v is not None}
 
         anything_changed = False
@@ -276,7 +283,7 @@ class EASOoDaoSync(Sync):
                 skipped_count += 1
                 continue
 
-            votes = await self.read_votes_from_db(proposal_id, self.infra_dao_slug)
+            votes = await self.read_votes_from_db(proposal_id)
             num_of_votes = len(votes)
 
             # No new votes have come in, we can re-use the last tally
@@ -365,13 +372,13 @@ class EASOoDaoSync(Sync):
 
 
             if start_block > 0:
-                proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block, self.infra_dao_slug))
+                proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block))
 
                 if self.delegate_metadata is None:
                     self.delegate_metadata = await self.get_delegate_metadata()
 
                 if not reuse_tally:
-                    snapshot_vp = await self.get_vp_snapshot_all_delegates(11155111, start_block, 'SYNDICATE')
+                    snapshot_vp = await self.get_vp_snapshot_all_delegates(start_block)
 
                     snapshot_vp_out = []
                     for row in snapshot_vp:
