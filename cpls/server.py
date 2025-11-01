@@ -3,6 +3,7 @@ Job Processing Server with Queue, Scheduler, and GCS Integration
 """
 
 import asyncio
+import copy
 from datetime import datetime
 from typing import Dict
 
@@ -18,7 +19,7 @@ from .gcs import GCSClient
 from .jobs import JobQueue, JobRequest, JobStatus
 import time
 
-from .config import ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHEDULER_INTERVAL_MINUTES
+from .config import ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHEDULER_INTERVAL_MINUTES, load_tenant_configs
 
 
 # Initialize components
@@ -27,7 +28,7 @@ scheduler = AsyncIOScheduler()
 gcs_client = GCSClient(GCS_BUCKET_NAME)
 
 
-async def scheduled_job(infra_dao_slug):
+async def scheduled_job(config: Dict, infra_dao_slug: str):
     """Function to be called by the scheduler periodically"""
 
     if infra_dao_slug == 'optimism':
@@ -46,7 +47,8 @@ async def scheduled_job(infra_dao_slug):
             "timestamp": datetime.now().isoformat(),
             # "interval_minutes": SCHEDULER_INTERVAL_MINUTES,
             "infra_dao_slug": infra_dao_slug,
-            "sources": sources
+            "sources": sources,
+            "config": config
             
         }
     )
@@ -59,30 +61,42 @@ async def lifespan(app_instance: FastAPI):
     # Startup
     print("Starting server...")
 
+    # Load tenant configs once at startup and attach to app state
+    tenants_config = load_tenant_configs()
+    print(f"Loaded {len(tenants_config)} tenant configurations")
+
     # Start job processor in background
     asyncio.create_task(job_queue.process_jobs(gcs_client))
 
-    INFRA_DAO_SLUGS = ["optimism", "scroll", "cyber", "pguild", "syndicate"]
+
+    INFRA_DAO_SLUGS = ["cyber", "pguild", "syndicate"]
 
     for infra_dao_slug in INFRA_DAO_SLUGS:
         # Configure scheduler to run at specified interval
+
+        kwargs = copy.copy(tenants_config[infra_dao_slug])
+        kwargs['infra_dao_slug'] = infra_dao_slug
+
         scheduler.add_job(
             scheduled_job,
             'interval',
             minutes=SCHEDULER_INTERVAL_MINUTES,
             id='scheduled_job-' + infra_dao_slug,
             max_instances=1,
-            kwargs = {'infra_dao_slug': infra_dao_slug}
+            kwargs=kwargs
         )
 
     scheduler.start()
 
     print(f"Scheduler configured to run every {SCHEDULER_INTERVAL_MINUTES} minutes")
 
-    if ENVIRONMENT == 'development':
+    if ENVIRONMENT == 'dev':
         for infra_dao_slug in INFRA_DAO_SLUGS:
             # Run first scheduled job immediately
-            await scheduled_job(infra_dao_slug)
+            kwargs = {}
+            kwargs['config'] = copy.copy(tenants_config[infra_dao_slug])
+            kwargs['infra_dao_slug'] = infra_dao_slug
+            await scheduled_job(**kwargs)
 
     print("Server started: Job processor and scheduler are running")
 
@@ -153,4 +167,5 @@ if __name__ == "__main__":
     print(f"Starting server in {ENVIRONMENT} mode")
     print(f"GCS Bucket: {GCS_BUCKET_NAME}")
     print(f"Scheduler Interval: {SCHEDULER_INTERVAL_MINUTES} minutes")
+
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT)

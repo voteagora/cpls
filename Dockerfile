@@ -10,6 +10,13 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install git (needed for cloning)
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
+# Clone private GitHub repo into /config
+ARG GITHUB_TOKEN
+RUN git clone https://${GITHUB_TOKEN}@github.com/voteagora/tenants.git /config
+
 # Copy application code
 COPY cpls/ ./cpls/
 COPY .env.example .env.example

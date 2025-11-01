@@ -40,7 +40,7 @@ SERVER_PORT=8000
 SCHEDULER_INTERVAL_MINUTES=10
 
 # Environment
-ENVIRONMENT=development
+ENVIRONMENT=dev
 ```
 
 ### GCS Authentication

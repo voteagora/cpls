@@ -121,7 +121,7 @@ class GCSClient:
             self._write_local_copy(compressed_blob_name, compressed_data, is_text=False)
 
             # Upload uncompressed version in development mode
-            if ENVIRONMENT == "development":
+            if ENVIRONMENT == "dev":
                 uncompressed_blob = self.bucket.blob(blob_name)
 
                 # Set cache control if provided
@@ -233,7 +233,7 @@ class GCSClient:
             self._write_local_copy(compressed_blob_name, compressed_data, is_text=False)
 
             # Upload uncompressed version in development mode
-            if ENVIRONMENT == "development":
+            if ENVIRONMENT == "dev":
                 uncompressed_blob = self.bucket.blob(blob_name)
 
                 # Set cache control if provided
