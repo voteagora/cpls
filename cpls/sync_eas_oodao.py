@@ -85,7 +85,7 @@ class EASOoDaoSync(Sync):
         qry = f"""select distinct on (delegate) delegate, block_number, new_votes 
                     from auazure.multi_synd_token_delegate_votes_changed 
                     where
-                    and address = '{self.token_addr}' 
+                    address = '{self.token_addr}' 
                     and block_number <= {block_number}
                 ORDER BY delegate, block_number desc"""
          
