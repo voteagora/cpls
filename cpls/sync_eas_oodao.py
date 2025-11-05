@@ -218,7 +218,9 @@ class EASOoDaoSync(Sync):
                                                 decoded_attestation->>'title' as title,
                                                 decoded_attestation->'startts' as startts,
                                                 decoded_attestation->>'description' as description,
-                                                data as proposal_id
+                                                data as proposal_id,
+                                                block_number as created_block_number,
+                                                attestation_time as created_time
                                                 from auazure."eas_attestations_v2" ocp WHERE topic3 = '{self.oodao_shemas['CREATE_PROPOSAL']}' and topic1_cropped = '{self.oodao_dao_id}';""")
             return rows
 
