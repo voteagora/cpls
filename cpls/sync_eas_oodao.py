@@ -46,6 +46,8 @@ class EASOoDaoSync(Sync):
 
         try:
 
+            self.index_tenant_prefix = self.config['index_tenant_prefix']
+            
             self.oodao_dao_id = self.config['deployment']['oodao']['address']
             self.oodao_chain_id = self.config['deployment']['oodao']['chain_id']
             self.oodao_shemas = OODAO[int(config['deployment']['oodao']['chain_id'])]

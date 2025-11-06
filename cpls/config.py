@@ -19,6 +19,8 @@ DATABASE_URL = os.getenv("DATABASE_URL", '')
 WRITE_TO_DISK = ENVIRONMENT == 'dev'
 TENANTS_CONFIG_PATH = Path(os.getenv("TENANT_CONFIG_PATH", '/config/envs/prod'))
 DEPLOYMENT = os.getenv("DEPLOYMENT", "main")
+INFRA_DAO_SLUGS = os.getenv("INFRA_DAO_SLUGS", "optimism,cyber,pguild,syndicate")
+INFRA_DAO_SLUGS = INFRA_DAO_SLUGS.split(',')
 
 
 def load_tenant_configs():

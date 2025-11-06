@@ -19,7 +19,7 @@ from .gcs import GCSClient
 from .jobs import JobQueue, JobRequest, JobStatus
 import time
 
-from .config import ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHEDULER_INTERVAL_MINUTES, load_tenant_configs
+from .config import INFRA_DAO_SLUGS, ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHEDULER_INTERVAL_MINUTES, load_tenant_configs
 
 
 # Initialize components
@@ -67,8 +67,6 @@ async def lifespan(app_instance: FastAPI):
     # Start job processor in background
     asyncio.create_task(job_queue.process_jobs(gcs_client))
 
-
-    INFRA_DAO_SLUGS = ["optimism","cyber", "pguild", "syndicate"]
 
     for infra_dao_slug in INFRA_DAO_SLUGS:
         # Configure scheduler to run at specified interval
