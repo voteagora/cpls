@@ -1,4 +1,6 @@
+import copy
 import httpx, time
+import asyncio
 from .gcs import GCSClient
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS
 
@@ -10,13 +12,37 @@ class DaoNodeSync(Sync):
 
     SOURCE = 'dao_node'
     
+    def __init__(self, infra_dao_slug, config=None, reset=False):
+
+        super().__init__(infra_dao_slug, config, reset)
+
+        try:
+            self.index_tenant_prefix = self.config['index_tenant_prefix']
+
+            self.gov_addr = self.config['deployment']['gov']['address']
+            self.token_addr = self.config['deployment']['token']['address']
+            self.chain_id = self.config['deployment']['chain_id']
+
+            self.dao_slug = self.config['dao_slug'] # This is the capitals one, in the DB.  infra_dao_slug is the lowercase one that matches the DB schema and tenants config file names.
+
+        except:
+            raise Exception(f'problem with config: {self.config}')
+    
+    async def estimated_timestamp_from_future_block_number(self, block_number: int):
+
+        return self.bc.get_estimated_blocktime(self.chain_id, block_number)
+    
+    async def read_snapshot_votable_supply(self, block_number: int):
+        
+        return await self.bc.votable_supply_at_block_with_oracle(self.chain_id, self.gov_addr, block_number)
     async def refresh_list(self, gcs_client: 'GCSClient'):
 
+        self.bc.clear_lru()
+        self.delegate_metadata = None
+
         async with httpx.AsyncClient() as http_client:
-            config_response = await http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/deployment")
-            deployment = config_response.json()['deployment']
-            chain_id = deployment['chain_id']
-            gov_addr = deployment['gov']['address']
+            chain_id = self.chain_id
+            gov_addr = self.gov_addr
 
             response = await http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/progress")
             some_pretty_recent_block = response.json()['block']
@@ -67,6 +93,65 @@ class DaoNodeSync(Sync):
                     skipped_count += 1
                     continue
 
+                # We can do this after for DAO-node, rather than before the cache check in EAS, because DAO-node can count the votes for us.
+                # We get it from the DB, rather than DAO-node, because the DB has txn hashes.
+
+                votes = await self.read_votes_from_db(proposal_id)
+                num_of_votes = len(votes)            
+                proposal['num_of_votes'] = num_of_votes
+                print(num_of_votes)
+
+                # No new votes have come in, we can re-use the last tally
+                reuse_tally = existing_num_of_votes > 0 and (existing_num_of_votes == num_of_votes) and (not self.reset)
+
+                start_block = proposal['start_block']
+                start_blocktime = await self.get_timestamp(chain_id, start_block)
+                proposal['start_blocktime'] = start_blocktime
+
+                if reuse_tally:
+                    pass
+                else:
+                    
+                    if self.delegate_metadata is None:
+                        self.delegate_metadata = await self.get_delegate_metadata()
+
+                    votes_out = []
+                    voter_set = []
+
+                    # First pass: prepare votes and collect addresses
+                    votes_data = []
+                    for vote in votes:
+                        copy_of_vote = copy.deepcopy(dict(vote))
+                        copy_of_vote['weight'] = str(int(vote['weight']))
+
+                        voter_set.append(copy_of_vote['voter'])
+
+                        addr = vote['voter'].lower()
+                        votes_data.append((copy_of_vote, addr))
+
+                    """
+                    # Gather all ENS lookups concurrently
+                    async def get_ens_safe(addr):
+                        try:
+                            ans = await self.bc.get_ens_lru(addr)
+                            return ans
+                        except:
+                            return None
+
+                    ens_results = await asyncio.gather(*[get_ens_safe(addr) for _, addr in votes_data])
+                    """
+
+                    # Second pass: update votes with ENS and metadata
+                    for copy_of_vote, addr in votes_data:
+                        delegate_meta = self.delegate_metadata.get(addr, {})
+                        copy_of_vote.update(delegate_meta)
+
+                        votes_out.append(copy_of_vote)
+
+                    voter_set = set(voter_set)
+
+                    await self.overwrite_votes(votes_out, proposal_id, gcs_client)
+
                 proposal['title'] = get_title_from_proposal_description(proposal['description'])
 
                 liveness = 'live'
@@ -78,18 +163,37 @@ class DaoNodeSync(Sync):
                 # if the hash for the proposal's state changes. Downstream consumers can either use it, accepting
                 # the caveate, or re-calculate it.
 
-                start_block = proposal['start_block']
-                start_blocktime = await self.get_timestamp(chain_id, start_block)
-                proposal['start_blocktime'] = start_blocktime
-
-                proposal['proposer_ens'] = await self.bc.get_ens(proposal['proposer'])
-
                 end_block = proposal['end_block']
                 proposal['end_blocktime'] = await self.get_timestamp(chain_id, end_block)
 
-                curtime = time.time()
-                
-                # print(proposal['start_blocktime'], curtime, proposal['end_blocktime'])
+
+                curtime = int(time.time())
+
+                if curtime > start_blocktime:
+                    proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block))
+
+
+                    if self.delegate_metadata is None:
+                        self.delegate_metadata = await self.get_delegate_metadata()
+
+                    if not reuse_tally:
+                        snapshot_vp = await self.get_vp_snapshot_all_delegates(start_block, gcs_client)
+
+                        snapshot_vp_out = []
+                        for row in snapshot_vp:
+
+                            if (row['addr'] not in voter_set) and int(row['vp']) > 0:
+
+                                addr = row['addr'].lower()
+                                record = copy.deepcopy(row)
+
+                                delegate_metadata = self.delegate_metadata.get(addr, {})
+
+                                record.update(delegate_metadata)
+                                
+                                snapshot_vp_out.append(record)                        
+
+                        await self.overwrite_hasnt_voted(snapshot_vp_out, proposal_id, gcs_client)
 
                 """
                 enum ProposalState {

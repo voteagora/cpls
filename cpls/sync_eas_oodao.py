@@ -57,22 +57,14 @@ class EASOoDaoSync(Sync):
 
         except:
             raise Exception(f'problem with config: {self.config}')
-    
-    async def read_votes_from_db(self, proposal_id):
-        pool = await self.pg.connect()
-        async with pool.acquire() as connection:
-            # No need to contract scope this, because the proposal_id is unique
-            qry = f"""select transaction_hash, block_number, chain_id, voter, support, weight, ts from {self.infra_dao_slug}.votes where proposal_id = '{proposal_id}';"""
-            rows = await connection.fetch(qry)
-            return rows
 
-    async def read_votes_direct_from_eas(self, proposal_id):
-        pool = await self.pg.connect()
-        async with pool.acquire() as connection:
-            # No need to contract scope this, because the proposal_id is unique
-            qry = f"""select * from auazure."eas_attestations_v2" ocv WHERE topic3 in ('{self.oodao_shemas['SIMPLE_VOTE']}', '{self.oodao_shemas['ADVANCED_VOTE']}') and decoded_attestation->'proposal_id' = '{proposal_id}';"""
-            rows = await connection.fetch(qry)
-            return rows
+    # async def read_votes_direct_from_eas(self, proposal_id):
+    #     pool = await self.pg.connect()
+    #     async with pool.acquire() as connection:
+    #         # No need to contract scope this, because the proposal_id is unique
+    #         qry = f"""select * from auazure."eas_attestations_v2" ocv WHERE topic3 in ('{self.oodao_shemas['SIMPLE_VOTE']}', '{self.oodao_shemas['ADVANCED_VOTE']}') and decoded_attestation->'proposal_id' = '{proposal_id}';"""
+    #         rows = await connection.fetch(qry)
+    #         return rows
 
     async def read_proposal_type_range(self):
 
@@ -93,54 +85,6 @@ class EASOoDaoSync(Sync):
             print(vp)
             return vp
 
-    async def read_snapshot_voting_power(self, delegate, block_number):
-
-        pool = await self.pg.connect()
-        async with pool.acquire() as connection:
-            row = await connection.fetchrow(f"""select {self.infra_dao_slug}.get_voting_power_at_block('{delegate}', {block_number}, '{self.token_addr}') as voting_power;""")
-            return int(row['voting_power'])
-    
-    async def get_vp_snapshot_all_delegates(self, block_number):
-
-        qry = f"""select distinct on (delegate) delegate, block_number, new_votes 
-                    from auazure.multi_synd_token_delegate_votes_changed 
-                    where
-                    address = '{self.token_addr}' 
-                    and block_number <= {block_number}
-                ORDER BY delegate, block_number desc"""
-         
-        pool = await self.pg.connect()
-        async with pool.acquire() as connection:
-            rows = await connection.fetch(qry)
-            return rows
-
-
-    async def get_delegate_metadata(self):
-
-        qry = f"""select distinct on(address) address,
-                                              discord, 
-                                              twitter as x, 
-                                              warpcast 
-                    from agora.delegate_statements mstdc 
-                    where "dao_slug" = '{self.dao_slug}' 
-                    and (LENGTH(discord) > 2 or LENGTH(twitter) > 2 or LENGTH(warpcast) > 2) 
-                    order by address, updated_at_ts desc"""
-         
-        pool = await self.pg.connect()
-
-        out = {}
-        async with pool.acquire() as connection:
-            rows = await connection.fetch(qry)
-
-            for row in rows:
-                addr = row['address'].lower()
-                out[addr] = {}
-
-                for platform in ['warpcast', 'x', 'discord']:
-                    if (row[platform] is not None):
-                        out[addr][platform] = row[platform]
-
-            return out
 
     async def read_proposal_type(self, proposal_id):
 
@@ -331,14 +275,14 @@ class EASOoDaoSync(Sync):
                     outcome = defaultdict(lambda: defaultdict(int))
 
                     votes_out = []
-                    vote_set = []
+                    voter_set = []
 
                     for vote in votes:
 
                         copy_of_vote = copy.deepcopy(dict(vote))
                         copy_of_vote['weight'] = str(int(vote['weight']))
 
-                        vote_set.append(copy_of_vote['voter'])
+                        voter_set.append(copy_of_vote['voter'])
 
                         addr = vote['voter'].lower()
 
@@ -356,12 +300,7 @@ class EASOoDaoSync(Sync):
 
                         votes_out.append(copy_of_vote)
 
-                        # vote_att = json.loads(vote['decoded_attestation']) #vote['decoded_attestation']
-                        # print(vote)
-                        # choice = vote_att['choice']
-                        # outcome['token-holders'][choice] += await self.read_snapshot_voting_power(vote['voter'], vote['block_number'], self.infra_dao_slug)
-                
-                    vote_set = set(vote_set)
+                    voter_set = set(voter_set)
 
                     for key in outcome['token-holders'].keys():
                         outcome['token-holders'][key] = str(outcome['token-holders'][key])
@@ -398,26 +337,22 @@ class EASOoDaoSync(Sync):
                 end_block = -1
 
 
-            if start_block > 0:
+            if start_block > 0: # For OODAO, this means a block number is known.
                 proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block))
 
                 if self.delegate_metadata is None:
                     self.delegate_metadata = await self.get_delegate_metadata()
 
                 if not reuse_tally:
-                    snapshot_vp = await self.get_vp_snapshot_all_delegates(start_block)
+                    snapshot_vp = await self.get_vp_snapshot_all_delegates(start_block, gcs_client)
 
                     snapshot_vp_out = []
                     for row in snapshot_vp:
 
-                        if (row['delegate'] not in vote_set) and int(row['new_votes']) > 0:
+                        if (row['addr'] not in voter_set):
 
-                            addr = row['delegate'].lower()
-                            record = {
-                                'addr': addr,
-                                'bn': row['block_number'],
-                                'vp': row['new_votes']
-                                }
+                            addr = row['addr'].lower()
+                            record = copy.deepcopy(row)
                             
                             try:
                                 ens = await self.bc.get_ens_lru(addr)

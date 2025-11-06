@@ -116,6 +116,9 @@ class Sync:
 
         await gcs_client.upload_ndjson(proposal_list, f"data/{self.infra_dao_slug}/proposal_list.full.ndjson")
 
+    def vp_snapshot_blob_name(self, snapshot_reference):
+        return f"data/{self.infra_dao_slug}/vpsnapshot/{self.SOURCE}/raw/{snapshot_reference}.ndjson"
+
     def proposal_blob_name(self, proposal_id):
         return f"data/{self.infra_dao_slug}/proposal/{self.SOURCE}/raw/{proposal_id}.json"
     
@@ -215,6 +218,88 @@ class Sync:
         blob_name = self.proposal_blob_name(proposal['id'])
         
         await gcs_client.upload_dict(proposal, blob_name, metadata=metadata, cache_control=cache_contr)
+
+
+    async def read_votes_from_db(self, proposal_id):
+
+        if self.SOURCE == 'eas-oodao':
+            add_ts = ", ts"
+        else:
+            add_ts = ""
+
+        qry = f"""select transaction_hash, block_number, chain_id, voter, support, weight {add_ts} from {self.infra_dao_slug}.votes where proposal_id = '{proposal_id}';"""
+
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            # No need to contract scope this, because the proposal_id is unique
+            rows = await connection.fetch(qry)
+            return rows
+    
+    async def get_vp_snapshot_all_delegates_from_db(self, block_number):
+
+        if self.infra_dao_slug in ('optimism', 'uniswap', 'ens'):
+            col = 'new_balance'
+        else:
+            col = 'new_votes'
+
+        qry = f"""with qry as (select distinct on (delegate) delegate as addr, {col} as vp 
+                        from auazure.{self.index_tenant_prefix}_token_delegate_votes_changed 
+                        where
+                        address = '{self.token_addr}' 
+                        and block_number <= {block_number}
+                        ORDER BY delegate, block_number desc)
+            
+            select * from qry where vp::numeric > 0;"""
+         
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(qry)
+            return [dict(r) for r in rows]
+    
+    async def get_vp_snapshot_all_delegates(self, block_number, gcs_client: 'GCSClient', reset=False):
+
+        blob_name = self.vp_snapshot_blob_name(block_number)
+
+        if not reset:
+            try:
+                data = await gcs_client.read_ndjson(blob_name)
+                if data is not None:
+                    return data
+            except:
+                pass
+
+        data = await self.get_vp_snapshot_all_delegates_from_db(block_number)
+
+        await gcs_client.upload_ndjson(data, blob_name)
+
+        return data
+
+    async def get_delegate_metadata(self):
+
+        qry = f"""select distinct on(address) address,
+                                              discord, 
+                                              twitter as x, 
+                                              warpcast
+                    from agora.delegate_statements mstdc 
+                    where "dao_slug" = '{self.dao_slug}' 
+                    and (LENGTH(discord) > 2 or LENGTH(twitter) > 2 or LENGTH(warpcast) > 2) 
+                    order by address, updated_at_ts desc"""
+
+        pool = await self.pg.connect()
+
+        out = {}
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(qry)
+
+            for row in rows:
+                addr = row['address'].lower()
+                out[addr] = {}
+
+                for platform in ['warpcast', 'x', 'discord']:
+                    if (row[platform] is not None):
+                        out[addr][platform] = row[platform]
+
+            return out
 
 if __name__ == "__main__":
 
