@@ -265,9 +265,12 @@ class EASOoDaoSync(Sync):
 
             if reuse_tally:
                 existing_proposal_data = await gcs_client.read_dict(blob.name)
-                outcome = existing_proposal_data['outcome']
-            
-            else:
+
+                if existing_proposal_data is None:
+                    print("We got None for existing_proposal_data for %s, this shouldn't be possible" % proposal_id)
+                    reuse_tally = False
+
+            if not reuse_tally:
 
                 if self.delegate_metadata is None:
                     self.delegate_metadata = await self.get_delegate_metadata()
