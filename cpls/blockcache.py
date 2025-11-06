@@ -98,27 +98,39 @@ class BlockCacheClient:
             "block_number": block_number,
             "data": data
         }
-
         resp = await self.client.post(url, headers=headers, json=payload)
         resp.raise_for_status()
         return resp.json()
 
     async def contract_call_encoded(self, chain_id, contract_address, block_number, method_signature, values):
-
-        # Encode the parameters according to the schema
-
-        method_name = method_signature.split("(")[0]
-        method_schema = method_signature.replace(method_name + "(", "")[:-1].split(",")
         
-        encoded_params = encode(method_schema, values)
+        method_name = method_signature.split("(")[0]
 
-        # Convert to hex string with 0x prefix
-        data = str(encoded_params.hex()).removeprefix("0x")
+        if method_signature[-2:] != "()":
+            method_schema = method_signature.replace(method_name + "(", "")[:-1].split(",")
+            encoded_params = encode(method_schema, values)
+            # Convert to hex string with 0x prefix
+            data = str(encoded_params.hex()).removeprefix("0x")
+        else:
+            data = ''
 
         # Call the lower-level contract_call method
         result = await self.contract_call(chain_id, contract_address, method_signature, block_number, data)
 
         return result
+    
+    async def votable_supply_at_block_with_oracle(self, chain_id, contract_address, block_number):
+
+        result = await self.contract_call_encoded(chain_id, contract_address, block_number, 'votableSupply(uint256)', [block_number])
+        vs = int(result['result'], 16)
+        return vs
+
+    async def votable_supply_at_block(self, chain_id, contract_address, block_number):
+        result = await self.contract_call_encoded(chain_id, contract_address, block_number, 'votableSupply()', [])
+        vs = int(result['result'], 16)
+
+        return vs
+
     
 if __name__ == '__main__':
 
