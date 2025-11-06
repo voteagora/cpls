@@ -147,8 +147,10 @@ class Sync:
         blob_name = self.proposal_blob_name(proposal_id)
 
         blob = await gcs_client.get_blob(blob_name)
+        print(f"Checking if {blob.name} exists...")
         try:
             exists = blob.exists()
+            print(exists)
         except Exception as e:
             msg = "Existence check failed, we can't proceed, we're blind.  We don't want to corrupt in case of the source pruning."
             print(e)
