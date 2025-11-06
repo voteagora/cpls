@@ -18,8 +18,33 @@ class EASAtlasSync(Sync):
     async def read_votes(self, proposal_id):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            rows = await connection.fetch(f"""select * from atlas."OffChainVote" ocv where "proposalId" = '{proposal_id}';""")
+            rows = await connection.fetch(f"""select voter, support, weight::text, reason, params, citizen_type, voter_metadata->>'name' name, voter_metadata->>'image' image from atlas."VotesWithMeta" where  proposal_id = '{proposal_id}';""")
+            rows = [dict(r) for r in rows]
             return rows
+    
+
+    async def read_citizens(self):
+        qry = """SELECT 
+            c."address" as addr, 
+            1 as vp, 
+            citizen_type,
+            voter_metadata_text::json->>'name' name, 
+            voter_metadata_text::json->>'image' image
+        FROM atlas.citizens_mat c"""
+
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(qry)
+            rows = [dict(r) for r in rows]
+            breakpoint()
+            return rows
+
+    async def read_proposal_create_attestations(self):
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(f"""select created_attestation_hash from alltenant.offchain_proposals op ;""")
+            return [r['created_attestation_hash'] for r in rows]
+
 
     async def refresh_list(self, gcs_client: 'GCSClient'):
 
@@ -28,35 +53,18 @@ class EASAtlasSync(Sync):
         # Step 1 - Get a list of recent-ish proposals.  Think either the "full list of any proposal ever" OR "just stuff that may or may not be ready to archive"
         #
 
-        # THIS IS TOTALLY FLAWED LOGIC, the point is to make a file format that can be consumed as a second source.
-        known_create_attestations = {}
-        easa = """0xc89066cf84cc86c3cbb9cc148dbf7514a1b897ad5dbaf878716f6beee89fd6ff
-                0xe73cdaca33221711fddfe6c7302b0f1d1d9bf093a9d04643710890d74b865fec
-                0xffeefe5d1263a0b1275e407c4c8ecbf87031d7bb2f25b5a9911b14eacee974bc
-                0x46e273e2820a4254c6d3b79cf101d82dac8a25abb4eb0e8dd940c4758553fac0
-                0xd70f9590ca82e2d263d95ba72a76c9bc9e2a6007c5c906a699794776a2f47d4d
-                0x0701b609c2904f1b05bdaa38ab898ad74478c3a3eff4e0691a60509090ef2af2
-                0x42247c00390396ad0d598e3ec39bc349c6a3f17fe44bcf574707a904960c127e""".split("\n")
-        known_create_attestations['optimism'] = [e.strip() for e in easa]
-        # End of flawed logic
-
-        headers = {'alchemy-api-key': ALCHEMY_API_KEY}
+        citizens = await self.read_citizens()
+        
+        known_create_attestations = await self.read_proposal_create_attestations()
 
         anything_changed = False
         skipped_count = 0
         refreshed_count = 0
-        for proposals_uid in known_create_attestations[self.infra_dao_slug]:
+        for proposals_uid in known_create_attestations:
 
             for chain_id in [10, 1]:
 
-                url = f"https://blacache-production.up.railway.app/decoded_eas/{chain_id}/attestation/{proposals_uid}"
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(url, headers=headers)
-
-                if response.status_code != 200:
-                    print(f"Failed to fetch proposal {proposals_uid}")
-                    continue
-
+                
                 proposal_attestation = await self.bc.get_decoded_eas(chain_id, proposals_uid)
 
                 if proposal_attestation is None:
@@ -80,7 +88,7 @@ class EASAtlasSync(Sync):
                 proposal_id = proposal['id']
 
                 try:
-                    existing_proposal_hash = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
+                    blob, existing_liveness, existing_proposal_hash, existing_num_of_votes  = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
                 except SkipProposal as e:
                     print(e)
                     skipped_count += 1
@@ -90,29 +98,36 @@ class EASAtlasSync(Sync):
                 proposal['proposer_ens'] = await self.bc.get_ens(proposal['proposer'])
 
                 votes = await self.read_votes(proposal_id)
+                num_of_votes = len(votes)
+                                   
+                # No new votes have come in, we can re-use the last tally
+                reuse_tally = existing_num_of_votes > 0 and (existing_num_of_votes == num_of_votes) and (not self.reset)
+                proposal['num_of_votes'] = num_of_votes
 
-                
+                if reuse_tally:
+                    existing_proposal_data = await gcs_client.read_dict(blob.name)
+                    outcome = existing_proposal_data['outcome']
+                else:
 
-                if proposal_type in ('OPTIMISTIC', 'STANDARD'):
+                    if proposal_type in ('OPTIMISTIC', 'STANDARD'):
 
-                    outcome = defaultdict(lambda: defaultdict(int))
+                        outcome = defaultdict(lambda: defaultdict(int))
 
-                    for vote in votes:
-                        support = vote['vote']
-                        support = json.loads(support)
-                        for elem in support:
-                            outcome[vote['citizenCategory']][elem] += 1
+                        for vote in votes:
+                            support = int(vote['support'])
+                            outcome[vote['citizen_type']][support] += int(vote['weight'])
 
-                elif proposal_type == 'APPROVAL': 
+                    elif proposal_type == 'APPROVAL': 
 
-                    outcome = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
-                   
-                    for vote in votes:
-                        support = vote['vote']
-                        options, supports =json.loads(support)
-                        
-                        for option, support in zip(options, supports):
-                            outcome[vote['citizenCategory']][option][support] += 1
+                        outcome = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+                    
+                        for vote in votes:
+                            support = vote['support']
+                            options =json.loads(support)
+                            for option in options:
+                                outcome[vote['ctizen_type']][option][1] += int(vote['weight'])
+
+                    await self.overwrite_votes(votes, proposal_id, gcs_client)
 
                 proposal['outcome'] = outcome
             
@@ -123,7 +138,10 @@ class EASAtlasSync(Sync):
                     skipped_count += 1
                     continue
 
-
+                set_of_voters = set(row['addr'].lower() for row in votes)
+                has_not_voted = [row for row in citizens if row['addr'].lower() not in set_of_voters]
+                await self.overwrite_hasnt_voted(has_not_voted, proposal_id, gcs_client)
+                
                 # This section here, enriches the proposal object, in a way that will only update,
                 # if the hash for the proposal's state changes. Downstream consumers can either use it, accepting
                 # the caveate, or re-calculate it.
