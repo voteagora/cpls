@@ -35,7 +35,7 @@ class DaoNodeSync(Sync):
     async def read_snapshot_votable_supply(self, block_number: int):
         
         if self.infra_dao_slug == 'optimism':
-            return await self.bc.votable_supply_at_block_with_oracle(self.chain_id, self.gov_addr, block_number)
+            return -2 # await self.bc.votable_supply_at_block_with_oracle(self.chain_id, self.gov_addr, block_number)
         else:
             return -1
     
