@@ -34,7 +34,11 @@ class DaoNodeSync(Sync):
     
     async def read_snapshot_votable_supply(self, block_number: int):
         
-        return await self.bc.votable_supply_at_block_with_oracle(self.chain_id, self.gov_addr, block_number)
+        if self.infra_dao_slug == 'optimism':
+            return await self.bc.votable_supply_at_block_with_oracle(self.chain_id, self.gov_addr, block_number)
+        else:
+            return -1
+
     async def refresh_list(self, gcs_client: 'GCSClient'):
 
         self.bc.clear_lru()
