@@ -38,11 +38,32 @@ class DaoNodeSync(Sync):
             return await self.bc.votable_supply_at_block_with_oracle(self.chain_id, self.gov_addr, block_number)
         else:
             return -1
+    
+    async def read_govless_proposal_mappings(self):
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(f"""select id as govless_proposal_id, onchain_proposalid as governor_proposalid from alltenant.offchain_proposals op ;""")
+            mapping = {r['governor_proposalid']: r['govless_proposal_id'] for r in rows if r['govless_proposal_id'] is not None}
+            breakpoint()
+            return mapping
+
+    def govless_proposal_blob_name(self, proposal_id):
+        return f"data/{self.infra_dao_slug}/proposal/eas-atlas/raw/{proposal_id}.json"
+
+    def govless_votes_blob_name(self, proposal_id):
+        return f"data/{self.infra_dao_slug}/votes/eas-atlas/{proposal_id}.ndjson"    
+    def govless_hasnt_voted_blob_name(self, proposal_id):
+        return f"data/{self.infra_dao_slug}/hasnt_voted/eas-atlas/{proposal_id}.ndjson"
 
     async def refresh_list(self, gcs_client: 'GCSClient'):
 
         self.bc.clear_lru()
         self.delegate_metadata = None
+
+        if self.infra_dao_slug == 'optimism':
+            mapping = await self.read_govless_proposal_mappings()
+        else:
+            mapping = {}
 
         async with httpx.AsyncClient() as http_client:
             chain_id = self.chain_id
@@ -79,7 +100,6 @@ class DaoNodeSync(Sync):
                     skipped_count += 1
                     continue
 
-                print(existing_proposal_hash, existing_num_of_votes)
 
                 try:
                     response = await http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposal/{proposal_info['id']}")
@@ -89,6 +109,20 @@ class DaoNodeSync(Sync):
                     print(e)
                     skipped_count += 1
                     continue
+
+                HYBRID = proposal_id in mapping
+
+                proposal['hybrid'] = HYBRID
+                
+                if HYBRID:
+                    print("found a hybrid proposal!")
+                    govless_proposal_blob_name = self.govless_proposal_blob_name(mapping[proposal_id])
+                    proposal['govless_proposal'] = await gcs_client.read_dict(govless_proposal_blob_name)
+
+                    # TODO - any other keys that can be deleted?
+                    for key in ['title', 'description']:
+                        if key in proposal['govless_proposal']:
+                            del proposal['govless_proposal'][key]
 
                 # These are needed for cache busting.
                 proposal['after_start_block'] = proposal['start_block'] > some_pretty_recent_block
@@ -157,7 +191,13 @@ class DaoNodeSync(Sync):
 
                     voter_set = set(voter_set)
 
-                    await self.overwrite_votes(votes_out, proposal_id, gcs_client)
+                    if HYBRID:
+                        govless_votes_blob_name = self.govless_votes_blob_name(mapping[proposal_id])
+                        govless_votes = await gcs_client.read_ndjson(govless_votes_blob_name)
+                    else:
+                        govless_votes = []
+
+                    await self.overwrite_votes(votes_out + govless_votes, proposal_id, gcs_client)
 
                 proposal['title'] = get_title_from_proposal_description(proposal['description'])
 
@@ -200,7 +240,14 @@ class DaoNodeSync(Sync):
                                 
                                 snapshot_vp_out.append(record)                        
 
-                        await self.overwrite_hasnt_voted(snapshot_vp_out, proposal_id, gcs_client)
+
+                        if HYBRID:
+                            govless_hasnt_voted_blob_name = self.govless_hasnt_voted_blob_name(mapping[proposal_id])
+                            govless_hasnt_voted = await gcs_client.read_ndjson(govless_hasnt_voted_blob_name)
+                        else:
+                            govless_hasnt_voted = []
+
+                        await self.overwrite_hasnt_voted(snapshot_vp_out + govless_hasnt_voted, proposal_id, gcs_client)
 
                 """
                 enum ProposalState {
