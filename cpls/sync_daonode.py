@@ -62,6 +62,8 @@ class DaoNodeSync(Sync):
             
                 proposal_id = proposal_info['id']
 
+                print(proposal_id)
+
                 OPTIMISM_TEST_PROPOSALS = ['90839767999322802375479087567202389126141447078032129455920633707568400402209',
                                            '28601282374834906210319879956567232553560898502158891728063939287236508034960',
                                            '89934444025525534467725222948723300602129924689317116631018191521555230364343']
@@ -76,6 +78,8 @@ class DaoNodeSync(Sync):
                     print(e)
                     skipped_count += 1
                     continue
+
+                print(existing_proposal_hash, existing_num_of_votes)
 
                 try:
                     response = await http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposal/{proposal_info['id']}")
@@ -103,7 +107,6 @@ class DaoNodeSync(Sync):
                 votes = await self.read_votes_from_db(proposal_id)
                 num_of_votes = len(votes)            
                 proposal['num_of_votes'] = num_of_votes
-                print(num_of_votes)
 
                 # No new votes have come in, we can re-use the last tally
                 reuse_tally = existing_num_of_votes > 0 and (existing_num_of_votes == num_of_votes) and (not self.reset)
