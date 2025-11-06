@@ -36,7 +36,6 @@ class EASAtlasSync(Sync):
         async with pool.acquire() as connection:
             rows = await connection.fetch(qry)
             rows = [dict(r) for r in rows]
-            breakpoint()
             return rows
 
     async def read_proposal_create_attestations(self):
