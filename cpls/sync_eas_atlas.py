@@ -44,6 +44,11 @@ class EASAtlasSync(Sync):
             rows = await connection.fetch(f"""select created_attestation_hash from alltenant.offchain_proposals op ;""")
             return [r['created_attestation_hash'] for r in rows]
 
+    async def read_govless_proposal_set(self):
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(f"""select id as govless_proposal_id from alltenant.offchain_proposals op where onchain_proposalid is null;""")
+            return set([r['govless_proposal_id'] for r in rows if r['govless_proposal_id']])
 
     async def refresh_list(self, gcs_client: 'GCSClient'):
 
@@ -52,6 +57,7 @@ class EASAtlasSync(Sync):
         # Step 1 - Get a list of recent-ish proposals.  Think either the "full list of any proposal ever" OR "just stuff that may or may not be ready to archive"
         #
 
+        govless_proposal_set = await self.read_govless_proposal_set()
         citizens = await self.read_citizens()
         
         known_create_attestations = await self.read_proposal_create_attestations()
@@ -74,6 +80,7 @@ class EASAtlasSync(Sync):
                     print(f"Failed to fetch proposal {proposals_uid}")
                     continue
 
+
                 proposal = proposal_attestation['attestation']
                 proposal['chain_id'] = proposal_attestation['chain_id']
                 proposal.update(proposal_attestation['decoded_data'])
@@ -83,8 +90,9 @@ class EASAtlasSync(Sync):
                 proposal_type = proposal['proposal_type']
 
                 proposal['id'] = str(proposal['id'])
-
                 proposal_id = proposal['id']
+
+                proposal['hybrid'] = not (proposal_id in govless_proposal_set)
 
                 try:
                     blob, existing_liveness, existing_proposal_hash, existing_num_of_votes  = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)

@@ -42,9 +42,8 @@ class DaoNodeSync(Sync):
     async def read_govless_proposal_mappings(self):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            rows = await connection.fetch(f"""select id as govless_proposal_id, onchain_proposalid as governor_proposalid from alltenant.offchain_proposals op ;""")
-            mapping = {r['governor_proposalid']: r['govless_proposal_id'] for r in rows if r['govless_proposal_id'] is not None}
-            breakpoint()
+            rows = await connection.fetch(f"""select id as govless_proposal_id, onchain_proposalid as governor_proposalid from alltenant.offchain_proposals op where onchain_proposalid is not null;""")
+            mapping = {r['governor_proposalid']: r['govless_proposal_id'] for r in rows}
             return mapping
 
     def govless_proposal_blob_name(self, proposal_id):
@@ -110,11 +109,11 @@ class DaoNodeSync(Sync):
                     skipped_count += 1
                     continue
 
-                HYBRID = proposal_id in mapping
+                hybrid = proposal_id in mapping
 
-                proposal['hybrid'] = HYBRID
+                proposal['hybrid'] = hybrid
                 
-                if HYBRID:
+                if hybrid:
                     print("found a hybrid proposal!")
                     govless_proposal_blob_name = self.govless_proposal_blob_name(mapping[proposal_id])
                     proposal['govless_proposal'] = await gcs_client.read_dict(govless_proposal_blob_name)
@@ -191,9 +190,11 @@ class DaoNodeSync(Sync):
 
                     voter_set = set(voter_set)
 
-                    if HYBRID:
+                    if hybrid:
                         govless_votes_blob_name = self.govless_votes_blob_name(mapping[proposal_id])
                         govless_votes = await gcs_client.read_ndjson(govless_votes_blob_name)
+                        if govless_votes is None:
+                            govless_votes = []
                     else:
                         govless_votes = []
 
@@ -241,9 +242,11 @@ class DaoNodeSync(Sync):
                                 snapshot_vp_out.append(record)                        
 
 
-                        if HYBRID:
+                        if hybrid:
                             govless_hasnt_voted_blob_name = self.govless_hasnt_voted_blob_name(mapping[proposal_id])
                             govless_hasnt_voted = await gcs_client.read_ndjson(govless_hasnt_voted_blob_name)
+                            if govless_hasnt_voted is None:
+                                govless_hasnt_voted = []
                         else:
                             govless_hasnt_voted = []
 
