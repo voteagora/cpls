@@ -145,7 +145,7 @@ class EASAtlasSync(Sync):
                     skipped_count += 1
                     continue
 
-                set_of_voters = set(row['addr'].lower() for row in votes)
+                set_of_voters = set(row['voter'].lower() for row in votes)
                 has_not_voted = [row for row in citizens if row['addr'].lower() not in set_of_voters]
                 await self.overwrite_hasnt_voted(has_not_voted, proposal_id, gcs_client)
                 
