@@ -175,8 +175,6 @@ class JobQueue:
     async def _execute_job(self, job: Job):
         """Execute the actual job logic"""
 
-        print(job.payload)
-
         # Initialize stats structure
         total_skipped = 0
         total_refreshed = 0
@@ -188,6 +186,7 @@ class JobQueue:
             config = job.payload['config']
             gcs_client = GCSClient(GCS_BUCKET_NAME)
 
+            print("Handling {source} for {infra_dao_slug}".format(source=source, infra_dao_slug=infra_dao_slug))
             if source == 'dao_node':
                 stats = await DaoNodeSync(infra_dao_slug, config).refresh_list(gcs_client)
             elif source == 'eas-atlas':
@@ -197,6 +196,7 @@ class JobQueue:
             else:
                 raise Exception(f"Unknown source: {source}")
 
+            print("Done")
             # Collect stats
             if stats:
                 stats_by_source[source] = stats
