@@ -161,7 +161,7 @@ class DaoNodeSync(Sync):
                         record['weight'] = str(int(record['weight']))
 
                         if approval:
-                            if len(record['params']) > 0:
+                            if record['params'] is not None and len(record['params']) > 0:
                                 params = record['params']
                                 params = [int(params[i*64:(i*64)+64],16) for i in range(int(len(params) / 64))]
                                 record['params'] = params
