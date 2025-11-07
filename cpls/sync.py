@@ -226,13 +226,13 @@ class Sync:
         else:
             add_ts = ""
 
-        qry = f"""select transaction_hash, block_number, chain_id, voter, support, weight {add_ts} from {self.infra_dao_slug}.votes where proposal_id = '{proposal_id}';"""
+        qry = f"""select transaction_hash, block_number, chain_id, voter, support, weight, reason, params {add_ts} from {self.infra_dao_slug}.votes where proposal_id = '{proposal_id}';"""
 
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
             # No need to contract scope this, because the proposal_id is unique
-            rows = await connection.fetch(qry)
-            return rows
+            return await connection.fetch(qry)
+
     
     async def get_vp_snapshot_all_delegates_from_db(self, block_number):
 

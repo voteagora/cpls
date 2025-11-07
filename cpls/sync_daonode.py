@@ -137,8 +137,9 @@ class DaoNodeSync(Sync):
                 # We can do this after for DAO-node, rather than before the cache check in EAS, because DAO-node can count the votes for us.
                 # We get it from the DB, rather than DAO-node, because the DB has txn hashes.
 
-                votes = await self.read_votes_from_db(proposal_id)
-                num_of_votes = len(votes)            
+                votes_rows = await self.read_votes_from_db(proposal_id)
+
+                num_of_votes = len(votes_rows)            
                 proposal['num_of_votes'] = num_of_votes
 
                 # No new votes have come in, we can re-use the last tally
@@ -148,10 +149,30 @@ class DaoNodeSync(Sync):
                 start_blocktime = await self.get_timestamp(chain_id, start_block)
                 proposal['start_blocktime'] = start_blocktime
 
+                approval = proposal['voting_module_name'] == 'approval'
+
                 if reuse_tally:
                     pass
                 else:
-                    
+
+                    votes = []
+                    for r in votes_rows:
+                        record = dict(r)
+                        record['weight'] = str(int(record['weight']))
+
+                        if approval:
+                            if len(record['params']) > 0:
+                                params = record['params']
+                                params = [int(params[i*64:(i*64)+64],16) for i in range(int(len(params) / 64))]
+                                record['params'] = params
+                            else:
+                                record['params'] = []
+                        else:
+                            del record['params']
+
+                        votes.append(record)
+
+
                     if self.delegate_metadata is None:
                         self.delegate_metadata = await self.get_delegate_metadata()
 
@@ -162,7 +183,6 @@ class DaoNodeSync(Sync):
                     votes_data = []
                     for vote in votes:
                         copy_of_vote = copy.deepcopy(dict(vote))
-                        copy_of_vote['weight'] = str(int(vote['weight']))
 
                         voter_set.append(copy_of_vote['voter'])
 
