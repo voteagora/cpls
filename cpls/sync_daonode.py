@@ -118,10 +118,12 @@ class DaoNodeSync(Sync):
                     govless_proposal_blob_name = self.govless_proposal_blob_name(mapping[proposal_id])
                     proposal['govless_proposal'] = await gcs_client.read_dict(govless_proposal_blob_name)
 
-                    # TODO - any other keys that can be deleted?
-                    for key in ['title', 'description']:
-                        if key in proposal['govless_proposal']:
-                            del proposal['govless_proposal'][key]
+
+                    if proposal['govless_proposal']:
+                        # TODO - any other keys that can be deleted?
+                        for key in ['title', 'description']:
+                            if key in proposal['govless_proposal']:
+                                del proposal['govless_proposal'][key]
 
                 # These are needed for cache busting.
                 proposal['after_start_block'] = proposal['start_block'] > some_pretty_recent_block
