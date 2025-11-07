@@ -132,7 +132,7 @@ class EASAtlasSync(Sync):
                             support = vote['support']
                             options =json.loads(support)
                             for option in options:
-                                outcome[vote['ctizen_type']][option][1] += int(vote['weight'])
+                                outcome[vote['citizen_type']][option][1] += int(vote['weight'])
 
                     await self.overwrite_votes(votes, proposal_id, gcs_client)
 
