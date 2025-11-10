@@ -81,11 +81,11 @@ class Sync:
 
         for blob in blobs:
 
-            if not blob.name.endswith('.json'):
+            if not blob.name.endswith('.json.gz'):
                 continue
             
             blob.reload() # refreshes metadata from server
-            data = await gcs_client.read_dict(blob.name)
+            data = await gcs_client.read_dict(blob.name.replace('.gz', ''))
 
             del data['description']
             del data['data_eng_properties']['hash']
@@ -104,13 +104,27 @@ class Sync:
 
         for blob in blobs:
 
-            if not blob.name.endswith('.ndjson'):
+            if not blob.name.endswith('.ndjson.gz'):
                 continue
             
             blob.reload() # refreshes metadata from server
-            data = await gcs_client.read_ndjson(blob.name)
+
+            data = await gcs_client.read_ndjson(blob.name.replace('.gz', ''))
 
             proposal_list.extend(data)
+
+        fresh_list = []
+
+        for prop in proposal_list:
+
+            if prop['data_eng_properties']['source'] == 'eas-atlas':
+
+                if prop['hybrid']:
+                    print("Confusingly, removing {} from full list because it's hybrid, so {} onchain should have referenc to it. ".format(prop['id'], prop['onchain_proposalid']))
+                    continue
+
+            fresh_list.append(prop)
+
         
         proposal_list.sort(key=lambda x: int(x['end_blocktime']), reverse=True)
 

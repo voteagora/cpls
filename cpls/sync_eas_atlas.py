@@ -68,16 +68,15 @@ class EASAtlasSync(Sync):
         for proposals_uid in known_create_attestations:
 
             for chain_id in [10, 1]:
-
                 
                 proposal_attestation = await self.bc.get_decoded_eas(chain_id, proposals_uid)
 
                 if proposal_attestation is None:
-                    print(f"Failed to fetch proposal {proposals_uid}")
+                    print(f"Failed to fetch proposal {proposals_uid}, on {chain_id}, cause None")
                     continue
 
                 if proposal_attestation['attestation']['uid'] == '0x0000000000000000000000000000000000000000000000000000000000000000':
-                    print(f"Failed to fetch proposal {proposals_uid}")
+                    print(f"Failed to fetch proposal {proposals_uid}, on {chain_id}, cause 0x00000")
                     continue
 
 
