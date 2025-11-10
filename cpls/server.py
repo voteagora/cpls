@@ -50,13 +50,13 @@ async def scheduled_job(config: Dict, infra_dao_slug: str):
             # "interval_minutes": SCHEDULER_INTERVAL_MINUTES,
             "infra_dao_slug": infra_dao_slug,
             "sources": sources,
-            "config": config
+            "config": config,
             "reset": reset_tracker[infra_dao_slug]
         }
     )
 
     reset_tracker[infra_dao_slug] = False
-    
+
     print(f"Added scheduled job: {job_id} for infra_dao_slug: {infra_dao_slug} w/ sources: {sources} @ interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
 
 
