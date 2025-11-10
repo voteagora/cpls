@@ -184,15 +184,17 @@ class JobQueue:
 
             infra_dao_slug = job.payload['infra_dao_slug']
             config = job.payload['config']
+            reset = job.payload['reset']
+
             gcs_client = GCSClient(GCS_BUCKET_NAME)
 
             print("Handling {source} for {infra_dao_slug}".format(source=source, infra_dao_slug=infra_dao_slug))
             if source == 'dao_node':
-                stats = await DaoNodeSync(infra_dao_slug, config).refresh_list(gcs_client)
+                stats = await DaoNodeSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
             elif source == 'eas-atlas':
-                stats = await EASAtlasSync(infra_dao_slug, config).refresh_list(gcs_client)
+                stats = await EASAtlasSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
             elif source == 'eas-oodao':
-                stats = await EASOoDaoSync(infra_dao_slug, config).refresh_list(gcs_client)
+                stats = await EASOoDaoSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
             else:
                 raise Exception(f"Unknown source: {source}")
 

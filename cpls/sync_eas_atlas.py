@@ -174,9 +174,9 @@ class EASAtlasSync(Sync):
 
                 await self.overwrite_proposal(proposal, proposal_hash, liveness, gcs_client)
 
-            if anything_changed:
-                await self.refresh_source_list(gcs_client)
-                await self.refresh_full_list(gcs_client)
+        if anything_changed or self.reset:
+            await self.refresh_source_list(gcs_client)
+            await self.refresh_full_list(gcs_client)
 
         return {
             'skipped': skipped_count,

@@ -6,6 +6,7 @@ import asyncio
 import copy
 from datetime import datetime
 from typing import Dict
+from collections import defaultdict
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
@@ -19,8 +20,10 @@ from .gcs import GCSClient
 from .jobs import JobQueue, JobRequest, JobStatus
 import time
 
-from .config import INFRA_DAO_SLUGS, ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHEDULER_INTERVAL_MINUTES, load_tenant_configs
+from .config import INFRA_DAO_SLUGS, ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHEDULER_INTERVAL_MINUTES, load_tenant_configs, RESET_PROPOSALS_ON_RESTART
 
+
+reset_tracker = defaultdict(lambda: RESET_PROPOSALS_ON_RESTART)
 
 # Initialize components
 job_queue = JobQueue()
@@ -48,9 +51,12 @@ async def scheduled_job(config: Dict, infra_dao_slug: str):
             "infra_dao_slug": infra_dao_slug,
             "sources": sources,
             "config": config
-            
+            "reset": reset_tracker[infra_dao_slug]
         }
     )
+
+    reset_tracker[infra_dao_slug] = False
+    
     print(f"Added scheduled job: {job_id} for infra_dao_slug: {infra_dao_slug} w/ sources: {sources} @ interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
 
 
