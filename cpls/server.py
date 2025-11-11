@@ -117,6 +117,7 @@ async def lifespan(app_instance: FastAPI):
             kwargs = {'config' : config, 'infra_dao_slug' : infra_dao_slug}
         )
 
+        """
         scheduler.add_job(
             scheduled_ens_job,
             'interval',
@@ -125,6 +126,7 @@ async def lifespan(app_instance: FastAPI):
             max_instances=1,
             kwargs = {'config' : config, 'infra_dao_slug' : infra_dao_slug}
         )
+        """
 
 
     scheduler.start()
