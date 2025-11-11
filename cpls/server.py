@@ -51,6 +51,7 @@ async def scheduled_proposal_job(config: Dict, infra_dao_slug: str):
             "timestamp": datetime.now().isoformat(),
             # "interval_minutes": SCHEDULER_INTERVAL_MINUTES,
             "infra_dao_slug": infra_dao_slug,
+            "logic": "refresh_list",
             "sources": sources,
             "config": config,
             "reset": reset_tracker[infra_dao_slug]
@@ -79,6 +80,7 @@ async def scheduled_ens_job(config: Dict, infra_dao_slug: str):
             "timestamp": datetime.now().isoformat(),
             # "interval_minutes": SCHEDULER_INTERVAL_MINUTES,
             "infra_dao_slug": infra_dao_slug,
+            "logic": "refresh_ens",
             "sources": sources,
             "config": config,
         }
@@ -117,7 +119,6 @@ async def lifespan(app_instance: FastAPI):
             kwargs = {'config' : config, 'infra_dao_slug' : infra_dao_slug}
         )
 
-        """
         scheduler.add_job(
             scheduled_ens_job,
             'interval',
@@ -126,7 +127,6 @@ async def lifespan(app_instance: FastAPI):
             max_instances=1,
             kwargs = {'config' : config, 'infra_dao_slug' : infra_dao_slug}
         )
-        """
 
 
     scheduler.start()

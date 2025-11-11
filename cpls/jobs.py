@@ -192,7 +192,9 @@ class JobQueue:
             config = job.payload['config']
             gcs_client = GCSClient(GCS_BUCKET_NAME)
 
-            if "proposal" in job.id:
+            print(f"Job ID: {job}")
+
+            if "refresh_list" == job.payload['logic']:
                 reset = job.payload['reset']
 
                 print("Handling {source} for {infra_dao_slug}".format(source=source, infra_dao_slug=infra_dao_slug))
@@ -207,7 +209,7 @@ class JobQueue:
                 else:
                     raise Exception(f"Unknown source: {source}")
                 
-            elif "ens" in job.id:
+            if "refresh_ens" == job.payload['logic']:
 
                 print("Handling {source} for {infra_dao_slug}".format(source=source, infra_dao_slug=infra_dao_slug))
                 if source == 'dao_node':
