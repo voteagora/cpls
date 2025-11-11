@@ -183,6 +183,11 @@ class JobQueue:
 
         for source in job.payload['sources']:
 
+            stats = {
+                'skipped': 0,
+                'refreshed': 0
+            }
+
             infra_dao_slug = job.payload['infra_dao_slug']
             config = job.payload['config']
             gcs_client = GCSClient(GCS_BUCKET_NAME)
