@@ -69,12 +69,7 @@ async def scheduled_ens_job(config: Dict, infra_dao_slug: str):
 
     assert isinstance(config['features'].get('oodao', False), bool)
     assert isinstance(config['features'].get('snapshot_proposals', False), bool)
-
-    SKIP_LIST = ['boost', 'world', 'nouns']
-
-    if infra_dao_slug in SKIP_LIST:
-        return
-
+    assert isinstance(config['features'].get('dao_node_proposals', False), bool)
 
     if config['features'].get('oodao', False):
         sources.append('eas-oodao')
@@ -85,7 +80,7 @@ async def scheduled_ens_job(config: Dict, infra_dao_slug: str):
     if infra_dao_slug == 'optimism':
         sources.append('eas-atlas')
 
-    if infra_dao_slug != 'syndicate':
+    if config['features'].get('dao_node_proposals', False):
         sources.append('dao_node')
 
     job_id = await job_queue.add_job(
