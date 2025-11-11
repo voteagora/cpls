@@ -85,7 +85,7 @@ class Sync:
                 continue
             
             blob.reload() # refreshes metadata from server
-            data = await gcs_client.read_dict(blob.name.replace('.gz', ''))
+            data = await gcs_client.read_dict(blob.name)
 
             del data['description']
             del data['data_eng_properties']['hash']
@@ -94,7 +94,7 @@ class Sync:
 
         proposal_list.sort(key=lambda x: x['end_block'], reverse=True)
 
-        await gcs_client.upload_ndjson(proposal_list, f"data/{self.infra_dao_slug}/proposal_list/{self.SOURCE}/raw.ndjson")
+        await gcs_client.upload_ndjson(proposal_list, f"data/{self.infra_dao_slug}/proposal_list/{self.SOURCE}/raw.ndjson.gz")
             
     async def refresh_full_list(self, gcs_client: 'GCSClient'):
 
@@ -109,7 +109,7 @@ class Sync:
             
             blob.reload() # refreshes metadata from server
 
-            data = await gcs_client.read_ndjson(blob.name.replace('.gz', ''))
+            data = await gcs_client.read_ndjson(blob.name)
 
             proposal_list.extend(data)
 
@@ -128,19 +128,19 @@ class Sync:
         
         proposal_list.sort(key=lambda x: int(x['end_blocktime']), reverse=True)
 
-        await gcs_client.upload_ndjson(proposal_list, f"data/{self.infra_dao_slug}/proposal_list.full.ndjson")
+        await gcs_client.upload_ndjson(proposal_list, f"data/{self.infra_dao_slug}/proposal_list.full.ndjson.gz")
 
     def vp_snapshot_blob_name(self, snapshot_reference):
-        return f"data/{self.infra_dao_slug}/vpsnapshot/{self.SOURCE}/raw/{snapshot_reference}.ndjson"
+        return f"data/{self.infra_dao_slug}/vpsnapshot/{self.SOURCE}/raw/{snapshot_reference}.ndjson.gz"
 
     def proposal_blob_name(self, proposal_id):
-        return f"data/{self.infra_dao_slug}/proposal/{self.SOURCE}/raw/{proposal_id}.json"
+        return f"data/{self.infra_dao_slug}/proposal/{self.SOURCE}/raw/{proposal_id}.json.gz"
     
     def votes_blob_name(self, proposal_id):
-        return f"data/{self.infra_dao_slug}/votes/{proposal_id}.ndjson"
+        return f"data/{self.infra_dao_slug}/votes/{proposal_id}.ndjson.gz"
     
     def hasnt_voted_blob_name(self, proposal_id):
-        return f"data/{self.infra_dao_slug}/hasnt_voted/{proposal_id}.ndjson"
+        return f"data/{self.infra_dao_slug}/hasnt_voted/{proposal_id}.ndjson.gz"
 
     def calculate_proposal_hash(self, proposal):
         return json_hash(proposal)
@@ -158,7 +158,7 @@ class Sync:
 
     async def read_existing_raw_proposal_hash_if_exists(self, proposal_id, gcs_client: 'GCSClient'):
 
-        blob_name = self.proposal_blob_name(proposal_id) + ".gz"
+        blob_name = self.proposal_blob_name(proposal_id)
 
         blob = await gcs_client.get_blob(blob_name)
         try:

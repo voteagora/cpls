@@ -76,11 +76,14 @@ class GCSClient:
 
     async def upload_dict(self, data: Dict, blob_name: str, cache_control: Optional[str] = None, metadata: Optional[Dict[str, str]] = None) -> bool:
         """
-        Upload a Python dictionary as gzipped JSON to GCS
+        Upload a Python dictionary as JSON to GCS.
+
+        If '.json' -> will upload as '.json'
+        If '.json.gz' -> will upload as '.json.gz' + optionally upload as '.json' if in dev.
 
         Args:
             data: Dictionary to upload
-            blob_name: Blob name ending with .json (will be converted to .json.gz)
+            blob_name: Blob name, to be written explicitly.
             cache_control: Cache-Control header value (e.g., "public, max-age=3600")
             metadata: Key-value pairs to store as blob metadata
 
@@ -92,48 +95,44 @@ class GCSClient:
             return False
 
         try:
-            # Ensure blob name ends with .json
-            if not blob_name.endswith('.json'):
-                raise ValueError("Blob name must end with '.json'")
+
+            must_upload_compressed = ('.gz' in blob_name)
+            must_upload_uncompressed = blob_name.endswith('.json') or (ENVIRONMENT == "dev")
+
+            if '.json.gz' in blob_name:
+                uncompressed_blob_name = blob_name.replace('.gz', '')
+                compressed_blob_name = blob_name
+            else:
+                uncompressed_blob_name = blob_name
+                compressed_blob_name = blob_name + '.gz'
 
             # Convert to JSON and compress
             json_data = json.dumps(data, indent=2)
-            compressed_data = gzip.compress(json_data.encode())
 
-            # Create compressed blob name
-            compressed_blob_name = blob_name.replace('.json', '.json.gz')
+            if must_upload_compressed:
+                compressed_data = gzip.compress(json_data.encode())
+                compressed_blob = self.bucket.blob(compressed_blob_name)
 
-            # Upload compressed version
-            compressed_blob = self.bucket.blob(compressed_blob_name)
+                if cache_control:
+                    compressed_blob.cache_control = cache_control
 
-            # Set cache control if provided
-            if cache_control:
-                compressed_blob.cache_control = cache_control
+                if metadata:
+                    compressed_blob.metadata = metadata
 
-            # Set metadata if provided
-            if metadata:
-                compressed_blob.metadata = metadata
+                compressed_blob.upload_from_string(compressed_data, content_type="application/gzip")
+                
+            if must_upload_uncompressed:
+                uncompressed_blob = self.bucket.blob(uncompressed_blob_name)
 
-            compressed_blob.upload_from_string(compressed_data, content_type="application/gzip")
-            # print(f"Uploaded compressed data to GCS: {compressed_blob_name}")
-
-            # Write local copy of compressed version
-            self._write_local_copy(compressed_blob_name, compressed_data, is_text=False)
-
-            # Upload uncompressed version in development mode
-            if ENVIRONMENT == "dev":
-                uncompressed_blob = self.bucket.blob(blob_name)
-
-                # Set cache control if provided
                 if cache_control:
                     uncompressed_blob.cache_control = cache_control
 
-                # Set metadata if provided
                 if metadata:
                     uncompressed_blob.metadata = metadata
 
                 uncompressed_blob.upload_from_string(json_data, content_type="application/json")
-                # print(f"Uploaded uncompressed data to GCS (dev): {blob_name}")
+
+            if WRITE_TO_DISK:
 
                 # Write local copy of uncompressed version
                 self._write_local_copy(blob_name, json_data.encode(), is_text=True)
@@ -146,10 +145,10 @@ class GCSClient:
 
     async def read_dict(self, blob_name: str) -> Optional[Dict]:
         """
-        Read a gzipped JSON blob from GCS and return as dictionary
+        Read an optionally gzipped JSON blob from GCS and return as dictionary
 
         Args:
-            blob_name: Blob name ending with .json (will be converted to .json.gz)
+            blob_name: Blob name ending with .json or .json.gz
 
         Returns:
             Dict if successful, None otherwise
@@ -159,27 +158,28 @@ class GCSClient:
             return None
 
         try:
-            # Ensure blob name ends with .json
-            if not blob_name.endswith('.json'):
-                raise ValueError("Blob name must end with '.json'")
 
-            # Create compressed blob name
-            compressed_blob_name = blob_name.replace('.json', '.json.gz')
+            assert ".json" in blob_name, "Blob name must end with '.json' or '.json.gz'"
+
+            # Ensure blob name ends with .json
+            must_uncompress = blob_name.endswith('.gz')
 
             # Download compressed blob
-            compressed_blob = self.bucket.blob(compressed_blob_name)
+            blob_data = self.bucket.blob(blob_name)
 
-            if not compressed_blob.exists():
-                print(f"Blob {compressed_blob_name} does not exist")
+            if not blob_data.exists():
+                print(f"Blob {blob_name} does not exist")
                 return None
 
-            compressed_data = compressed_blob.download_as_bytes()
+            if must_uncompress:
+                compressed_data = blob_data.download_as_bytes()
+                json_data = gzip.decompress(compressed_data).decode()
+            else:
+                json_data = blob_data.download_as_string()
 
-            # Decompress and parse JSON
-            json_data = gzip.decompress(compressed_data).decode()
             data = json.loads(json_data)
 
-            print(f"Successfully read data from GCS: {compressed_blob_name}")
+            print(f"Successfully read data from GCS: {blob_name}")
             return data
 
         except Exception as e:
@@ -204,51 +204,48 @@ class GCSClient:
             return False
 
         try:
-            # Ensure blob name ends with .ndjson
-            if not blob_name.endswith('.ndjson'):
-                raise ValueError("Blob name must end with '.ndjson'")
-
             # Convert to NDJSON (newline-delimited JSON)
             ndjson_data = '\n'.join(json.dumps(item) for item in data)
-            compressed_data = gzip.compress(ndjson_data.encode())
 
-            # Create compressed blob name
-            compressed_blob_name = blob_name.replace('.ndjson', '.ndjson.gz')
 
-            # Upload compressed version
-            compressed_blob = self.bucket.blob(compressed_blob_name)
+            must_upload_compressed = ('.gz' in blob_name)
+            must_upload_uncompressed = blob_name.endswith('.ndjson') or (ENVIRONMENT == "dev")
 
-            # Set cache control if provided
-            if cache_control:
-                compressed_blob.cache_control = cache_control
+            if '.ndjson.gz' in blob_name:
+                uncompressed_blob_name = blob_name.replace('.gz', '')
+                compressed_blob_name = blob_name
+            else:
+                uncompressed_blob_name = blob_name
+                compressed_blob_name = blob_name + '.gz'
 
-            # Set metadata if provided
-            if metadata:
-                compressed_blob.metadata = metadata
+            if must_upload_compressed:
+                compressed_data = gzip.compress(ndjson_data.encode())
+                compressed_blob = self.bucket.blob(compressed_blob_name)
 
-            compressed_blob.upload_from_string(compressed_data, content_type="application/gzip")
-            print(f"Uploaded compressed NDJSON to GCS: {compressed_blob_name}")
+                if cache_control:
+                    compressed_blob.cache_control = cache_control
 
-            # Write local copy of compressed version
-            self._write_local_copy(compressed_blob_name, compressed_data, is_text=False)
+                if metadata:
+                    compressed_blob.metadata = metadata
 
-            # Upload uncompressed version in development mode
-            if ENVIRONMENT == "dev":
-                uncompressed_blob = self.bucket.blob(blob_name)
+                compressed_blob.upload_from_string(compressed_data, content_type="application/gzip")
+                
+            if must_upload_uncompressed:
+                uncompressed_blob = self.bucket.blob(uncompressed_blob_name)
 
-                # Set cache control if provided
                 if cache_control:
                     uncompressed_blob.cache_control = cache_control
 
-                # Set metadata if provided
                 if metadata:
                     uncompressed_blob.metadata = metadata
 
                 uncompressed_blob.upload_from_string(ndjson_data, content_type="application/x-ndjson")
-                print(f"Uploaded uncompressed NDJSON to GCS (dev): {blob_name}")
+
+            if WRITE_TO_DISK:
 
                 # Write local copy of uncompressed version
                 self._write_local_copy(blob_name, ndjson_data.encode(), is_text=True)
+
 
             return True
 
@@ -271,24 +268,25 @@ class GCSClient:
             return None
 
         try:
-            # Ensure blob name ends with .ndjson
-            if not blob_name.endswith('.ndjson'):
-                raise ValueError("Blob name must end with '.ndjson'")
+            assert ".ndjson" in blob_name, "Blob name must end with '.ndjson.gz' or '.ndjson'"
 
-            # Create compressed blob name
-            compressed_blob_name = blob_name.replace('.ndjson', '.ndjson.gz')
+            must_uncompress = ('.gz' in blob_name)
 
             # Download compressed blob
-            compressed_blob = self.bucket.blob(compressed_blob_name)
+            blob_data = self.bucket.blob(blob_name)
 
-            if not compressed_blob.exists():
-                print(f"Blob {compressed_blob_name} does not exist")
+            if not blob_data.exists():
+                print(f"Blob {blob_name} does not exist")
                 return None
 
-            compressed_data = compressed_blob.download_as_bytes()
+            # Ensure blob name ends with .json
+            must_uncompress = blob_name.endswith('.gz')
 
-            # Decompress and parse NDJSON
-            ndjson_data = gzip.decompress(compressed_data).decode()
+            if must_uncompress:
+                compressed_data = blob_data.download_as_bytes()
+                ndjson_data = gzip.decompress(compressed_data).decode()
+            else:
+                ndjson_data = blob_data.download_as_string()
 
             # Parse each line as JSON
             data = []
@@ -296,7 +294,8 @@ class GCSClient:
                 if line.strip():  # Skip empty lines
                     data.append(json.loads(line))
 
-            print(f"Successfully read {len(data)} records from GCS: {compressed_blob_name}")
+            print(f"Successfully read {len(data)} records from GCS: {blob_name}")
+
             return data
 
         except Exception as e:

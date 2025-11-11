@@ -14,7 +14,7 @@ from .sync_eas_oodao import EASOoDaoSync
 import requests as r
 
 from .gcs import GCSClient
-from .config import GCS_BUCKET_NAME  
+from .config import GCS_BUCKET_NAME
 
 class JobStatus(str, Enum):
     PENDING = "pending"
