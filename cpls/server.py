@@ -26,7 +26,7 @@ from .config import INFRA_DAO_SLUGS, ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, 
 reset_tracker = defaultdict(lambda: RESET_PROPOSALS_ON_RESTART)
 
 # Initialize components
-job_queue = JobQueue()
+job_queue = JobQueue(15)
 scheduler = AsyncIOScheduler()
 gcs_client = GCSClient(GCS_BUCKET_NAME)
 
@@ -34,15 +34,23 @@ gcs_client = GCSClient(GCS_BUCKET_NAME)
 async def scheduled_proposal_job(config: Dict, infra_dao_slug: str):
     """Function to be called by the scheduler periodically"""
 
+    sources = []
+
+    assert isinstance(config['features'].get('oodao', False), bool)
+    assert isinstance(config['features'].get('snapshot_proposals', False), bool)
+    assert isinstance(config['features'].get('dao_node_proposals', False), bool)
 
     if config['features'].get('oodao', False):
-        sources = ['eas-oodao']
-    elif infra_dao_slug == 'optimism':
-        sources =['dao_node', 'eas-atlas']
-    elif infra_dao_slug == 'ens':
-        sources =['dao_node', 'snapshot']
-    else:
-        sources =['dao_node']
+        sources.append('eas-oodao')
+    
+    if config['features'].get('snapshot_proposals', False):
+        sources.append('snapshot')
+
+    if infra_dao_slug == 'optimism':
+        sources.append('eas-atlas')
+
+    if config['features'].get('dao_node_proposals', False):
+        sources.append('dao_node')
 
     job_id = await job_queue.add_job(
         job_type="scheduled",
