@@ -209,20 +209,6 @@ class JobQueue:
                 else:
                     raise Exception(f"Unknown source: {source}")
                 
-            if "refresh_ens" == job.payload['logic']:
-
-                print("Handling {source} for {infra_dao_slug}".format(source=source, infra_dao_slug=infra_dao_slug))
-                if source == 'dao_node':
-                    stats = await DaoNodeSync(infra_dao_slug, config).refresh_ens(gcs_client)
-                elif source == 'eas-atlas':
-                    stats = await EASAtlasSync(infra_dao_slug, config).refresh_ens(gcs_client)
-                elif source == 'eas-oodao':
-                    stats = await EASOoDaoSync(infra_dao_slug, config).refresh_ens(gcs_client)
-                elif source == 'snapshot':
-                    stats = await SnapshotSync(infra_dao_slug, config).refresh_ens(gcs_client)
-                else:
-                    raise Exception(f"Unknown source: {source}")
-
             # Collect stats
             if stats:
                 stats_by_source[source] = stats

@@ -102,8 +102,13 @@ async def lifespan(app_instance: FastAPI):
     # Start job processor in background
     asyncio.create_task(job_queue.process_jobs(gcs_client))
 
+    if "all" in INFRA_DAO_SLUGS:
+        infra_dao_slugs = list(tenants_config.keys())
+    else:    
+        infra_dao_slugs = INFRA_DAO_SLUGS
 
-    for infra_dao_slug in INFRA_DAO_SLUGS:
+
+    for infra_dao_slug in infra_dao_slugs:
         # Configure scheduler to run at specified interval
 
         config = copy.copy(tenants_config[infra_dao_slug])
@@ -115,15 +120,6 @@ async def lifespan(app_instance: FastAPI):
             'interval',
             minutes=SCHEDULER_INTERVAL_MINUTES,
             id='scheduled-proposal-job-' + infra_dao_slug,
-            max_instances=1,
-            kwargs = {'config' : config, 'infra_dao_slug' : infra_dao_slug}
-        )
-
-        scheduler.add_job(
-            scheduled_ens_job,
-            'interval',
-            minutes=SCHEDULER_INTERVAL_MINUTES * 60,
-            id='scheduled-ens-job-' + infra_dao_slug,
             max_instances=1,
             kwargs = {'config' : config, 'infra_dao_slug' : infra_dao_slug}
         )
