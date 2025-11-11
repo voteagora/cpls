@@ -7,6 +7,7 @@ from datetime import datetime
 from pydantic import BaseModel
 from enum import Enum
 
+from .sync_snapshot import SnapshotSync
 from .sync_daonode import DaoNodeSync
 from .sync_eas_atlas import EASAtlasSync
 from .sync_eas_oodao import EASOoDaoSync
@@ -184,21 +185,37 @@ class JobQueue:
 
             infra_dao_slug = job.payload['infra_dao_slug']
             config = job.payload['config']
-            reset = job.payload['reset']
-
             gcs_client = GCSClient(GCS_BUCKET_NAME)
 
-            print("Handling {source} for {infra_dao_slug}".format(source=source, infra_dao_slug=infra_dao_slug))
-            if source == 'dao_node':
-                stats = await DaoNodeSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
-            elif source == 'eas-atlas':
-                stats = await EASAtlasSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
-            elif source == 'eas-oodao':
-                stats = await EASOoDaoSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
-            else:
-                raise Exception(f"Unknown source: {source}")
+            if "proposal" in job.id:
+                reset = job.payload['reset']
 
-            print("Done")
+                print("Handling {source} for {infra_dao_slug}".format(source=source, infra_dao_slug=infra_dao_slug))
+                if source == 'dao_node':
+                    stats = await DaoNodeSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
+                elif source == 'eas-atlas':
+                    stats = await EASAtlasSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
+                elif source == 'eas-oodao':
+                    stats = await EASOoDaoSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
+                elif source == 'snapshot':
+                    stats = await SnapshotSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
+                else:
+                    raise Exception(f"Unknown source: {source}")
+                
+            elif "ens" in job.id:
+
+                print("Handling {source} for {infra_dao_slug}".format(source=source, infra_dao_slug=infra_dao_slug))
+                if source == 'dao_node':
+                    stats = await DaoNodeSync(infra_dao_slug, config).refresh_ens(gcs_client)
+                elif source == 'eas-atlas':
+                    stats = await EASAtlasSync(infra_dao_slug, config).refresh_ens(gcs_client)
+                elif source == 'eas-oodao':
+                    stats = await EASOoDaoSync(infra_dao_slug, config).refresh_ens(gcs_client)
+                elif source == 'snapshot':
+                    stats = await SnapshotSync(infra_dao_slug, config).refresh_ens(gcs_client)
+                else:
+                    raise Exception(f"Unknown source: {source}")
+
             # Collect stats
             if stats:
                 stats_by_source[source] = stats

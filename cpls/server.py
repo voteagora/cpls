@@ -31,7 +31,7 @@ scheduler = AsyncIOScheduler()
 gcs_client = GCSClient(GCS_BUCKET_NAME)
 
 
-async def scheduled_job(config: Dict, infra_dao_slug: str):
+async def scheduled_proposal_job(config: Dict, infra_dao_slug: str):
     """Function to be called by the scheduler periodically"""
 
 
@@ -59,6 +59,31 @@ async def scheduled_job(config: Dict, infra_dao_slug: str):
 
     print(f"Added scheduled job: {job_id} for infra_dao_slug: {infra_dao_slug} w/ sources: {sources} @ interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
 
+async def scheduled_ens_job(config: Dict, infra_dao_slug: str):
+    """Function to be called by the scheduler periodically"""
+
+
+    if config['features'].get('oodao', False):
+        sources = ['eas-oodao']
+    elif infra_dao_slug == 'optimism':
+        sources =['dao_node', 'eas-atlas']
+    else:
+        sources =['dao_node']
+
+    job_id = await job_queue.add_job(
+        job_type="scheduled",
+        payload={
+            "message": f"Scheduled job - {infra_dao_slug}",
+            "timestamp": datetime.now().isoformat(),
+            # "interval_minutes": SCHEDULER_INTERVAL_MINUTES,
+            "infra_dao_slug": infra_dao_slug,
+            "sources": sources,
+            "config": config,
+        }
+    )
+
+    print(f"Added scheduled ens job: {job_id} for infra_dao_slug: {infra_dao_slug} w/ sources: {sources} @ interval: {SCHEDULER_INTERVAL_MINUTES} minutes)")
+
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
@@ -82,13 +107,23 @@ async def lifespan(app_instance: FastAPI):
         assert infra_dao_slug == config['schema']
 
         scheduler.add_job(
-            scheduled_job,
+            scheduled_proposal_job,
             'interval',
             minutes=SCHEDULER_INTERVAL_MINUTES,
-            id='scheduled_job-' + infra_dao_slug,
+            id='scheduled-proposal-job-' + infra_dao_slug,
             max_instances=1,
             kwargs = {'config' : config, 'infra_dao_slug' : infra_dao_slug}
         )
+
+        scheduler.add_job(
+            scheduled_ens_job,
+            'interval',
+            minutes=SCHEDULER_INTERVAL_MINUTES * 60,
+            id='scheduled-ens-job-' + infra_dao_slug,
+            max_instances=1,
+            kwargs = {'config' : config, 'infra_dao_slug' : infra_dao_slug}
+        )
+
 
     scheduler.start()
 

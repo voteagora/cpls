@@ -88,11 +88,12 @@ class Sync:
             data = await gcs_client.read_dict(blob.name)
 
             del data['description']
+
             del data['data_eng_properties']['hash']
 
             proposal_list.append(data)
 
-        proposal_list.sort(key=lambda x: x['end_block'], reverse=True)
+        proposal_list.sort(key=lambda x: x['end_blocktime'], reverse=True)
 
         await gcs_client.upload_ndjson(proposal_list, f"data/{self.infra_dao_slug}/proposal_list/{self.SOURCE}/raw.ndjson.gz")
             
