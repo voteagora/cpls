@@ -269,6 +269,8 @@ class EASOoDaoSync(Sync):
                 if existing_proposal_data is None:
                     print("We got None for existing_proposal_data for %s, this shouldn't be possible" % proposal_id)
                     reuse_tally = False
+                
+                outcome = existing_proposal_data['outcome']
 
             if not reuse_tally:
 
