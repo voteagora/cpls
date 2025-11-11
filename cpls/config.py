@@ -20,7 +20,7 @@ print(DATABASE_URL)
 WRITE_TO_DISK = ENVIRONMENT == 'dev'
 TENANTS_CONFIG_PATH = Path(os.getenv("TENANT_CONFIG_PATH", '/config/envs/prod'))
 DEPLOYMENT = os.getenv("DEPLOYMENT", "main")
-INFRA_DAO_SLUGS = os.getenv("INFRA_DAO_SLUGS", "optimism,cyber,pguild,syndicate")
+INFRA_DAO_SLUGS = os.getenv("INFRA_DAO_SLUGS", "ens,optimism,cyber,pguild,syndicate")
 INFRA_DAO_SLUGS = INFRA_DAO_SLUGS.split(',')
 
 RESET_PROPOSALS_ON_RESTART = os.getenv("RESET_PROPOSALS_ON_RESTART", "true").lower() == "true"
