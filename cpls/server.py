@@ -39,6 +39,8 @@ async def scheduled_proposal_job(config: Dict, infra_dao_slug: str):
         sources = ['eas-oodao']
     elif infra_dao_slug == 'optimism':
         sources =['dao_node', 'eas-atlas']
+    elif infra_dao_slug == 'ens':
+        sources =['dao_node', 'snapshot']
     else:
         sources =['dao_node']
 
