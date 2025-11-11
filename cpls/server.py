@@ -70,6 +70,11 @@ async def scheduled_ens_job(config: Dict, infra_dao_slug: str):
     assert isinstance(config['features'].get('oodao', False), bool)
     assert isinstance(config['features'].get('snapshot_proposals', False), bool)
 
+    SKIP_LIST = ['boost', 'world', 'nouns']
+
+    if infra_dao_slug in SKIP_LIST:
+        return
+
 
     if config['features'].get('oodao', False):
         sources.append('eas-oodao')
