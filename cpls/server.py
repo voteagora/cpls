@@ -65,13 +65,23 @@ async def scheduled_proposal_job(config: Dict, infra_dao_slug: str):
 async def scheduled_ens_job(config: Dict, infra_dao_slug: str):
     """Function to be called by the scheduler periodically"""
 
+    sources = []
+
+    assert isinstance(config['features'].get('oodao', False), bool)
+    assert isinstance(config['features'].get('snapshot_proposals', False), bool)
+
 
     if config['features'].get('oodao', False):
-        sources = ['eas-oodao']
-    elif infra_dao_slug == 'optimism':
-        sources =['dao_node', 'eas-atlas']
-    else:
-        sources =['dao_node']
+        sources.append('eas-oodao')
+    
+    if config['features'].get('snapshot_proposals', False):
+        sources.append('snapshot')
+
+    if infra_dao_slug == 'optimism':
+        sources.append('eas-atlas')
+
+    if infra_dao_slug != 'syndicate':
+        sources.append('dao_node')
 
     job_id = await job_queue.add_job(
         job_type="scheduled",
