@@ -168,7 +168,6 @@ class GCSClient:
             blob_data = self.bucket.blob(blob_name)
 
             if not blob_data.exists():
-                print(f"Blob {blob_name} does not exist")
                 return None
 
             if must_uncompress:
@@ -179,7 +178,6 @@ class GCSClient:
 
             data = json.loads(json_data)
 
-            print(f"Successfully read data from GCS: {blob_name}")
             return data
 
         except Exception as e:
