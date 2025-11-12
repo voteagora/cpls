@@ -361,12 +361,19 @@ class DaoNodeSync(Sync):
                                                                          '94365805422398770067924881378455503928423439630602149628781926844759467250082',
                                                                          '103695324913424597802389181312722993037601032681914451632412140667432224173014']       
 
+
+                UNISWAP_CORRUPTED_PROPOSALS_MARKED_DEFEATED_I_GUESS = ['8', '7', '6', '5', '4', '3', '2', '1']
+
                 if proposal['id'] in OPTIMISM_CORRUPTED_PROPOSALS_MARKED_SUCCEEDED_I_GUESS:
                     proposal['lifecycle_stage'] = 'SUCCEEDED'
                     liveness = 'archived'
 
                 if proposal['id'] in CYBER_PASSED_PROPOSALS + SCROLL_PASSED_PROPOSALS + OPTIMISM_PASSED_PROPOSALS:
                     proposal['lifecycle_stage'] = 'PASSED'
+                    liveness = 'archived'
+                
+                if proposal['id'] in UNISWAP_CORRUPTED_PROPOSALS_MARKED_DEFEATED_I_GUESS:
+                    proposal['lifecycle_stage'] = 'DEFEATED'
                     liveness = 'archived'
 
                 if liveness != 'archived':
