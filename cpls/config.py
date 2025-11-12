@@ -22,8 +22,26 @@ TENANTS_CONFIG_PATH = Path(os.getenv("TENANT_CONFIG_PATH", '/config/envs/prod'))
 DEPLOYMENT = os.getenv("DEPLOYMENT", "main")
 INFRA_DAO_SLUGS = os.getenv("INFRA_DAO_SLUGS", "ens,optimism,cyber,pguild,syndicate")
 INFRA_DAO_SLUGS = INFRA_DAO_SLUGS.split(',')
-
 RESET_PROPOSALS_ON_RESTART = os.getenv("RESET_PROPOSALS_ON_RESTART", "true").lower() == "true"
+
+# Print all environment variables
+print("=" * 60)
+print("Environment Variables Configuration")
+print("=" * 60)
+print(f"ENVIRONMENT: {ENVIRONMENT}")
+print(f"GCS_BUCKET_NAME: {GCS_BUCKET_NAME}")
+print(f"SERVER_HOST: {SERVER_HOST}")
+print(f"SERVER_PORT: {SERVER_PORT}")
+print(f"SCHEDULER_INTERVAL_MINUTES: {SCHEDULER_INTERVAL_MINUTES}")
+print(f"ALCHEMY_API_KEY: {ALCHEMY_API_KEY}")
+print(f"BLOCKCACHE_URL: {BLOCKCACHE_URL}")
+print(f"DATABASE_URL: {DATABASE_URL}")
+print(f"WRITE_TO_DISK: {WRITE_TO_DISK}")
+print(f"TENANTS_CONFIG_PATH: {TENANTS_CONFIG_PATH}")
+print(f"DEPLOYMENT: {DEPLOYMENT}")
+print(f"INFRA_DAO_SLUGS: {INFRA_DAO_SLUGS}")
+print(f"RESET_PROPOSALS_ON_RESTART: {RESET_PROPOSALS_ON_RESTART}")
+print("=" * 60)
 
 
 def load_tenant_configs():
