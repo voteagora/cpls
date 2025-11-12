@@ -3,11 +3,12 @@ from .gcs import GCSClient
 from .postgres import PostgreSQLClient
 from .blockcache import BlockCacheClient
 
-from .config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY, DATABASE_URL, BLOCKCACHE_URL, load_tenant_config
+from .config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY, ALCHEMY_API_KEY_STAKING, DATABASE_URL, BLOCKCACHE_URL, load_tenant_config
 
 import hashlib
 import json
 import time
+import httpx
 
 FIVE_MINUTES_IN_SECONDS = 5 * 60
 
@@ -55,6 +56,7 @@ class Sync:
         self.pg = PostgreSQLClient(DATABASE_URL)
 
         self.bc = BlockCacheClient(BLOCKCACHE_URL, ALCHEMY_API_KEY, http_client)
+        self.bc_staking = BlockCacheClient(BLOCKCACHE_URL, ALCHEMY_API_KEY_STAKING, http_client)
     def calc_cache_control(self, liveness):
 
         if liveness == 'live':
@@ -198,7 +200,15 @@ class Sync:
     async def get_timestamp(self, chain_id, block_number):
         blocktime = await self.bc.get_blocktime(chain_id, block_number)
         return blocktime
-    
+
+    async def convert_l1_block_to_l3_block(self, l1_block_number, l1_chain_id):
+        """Convert L1 block number to L3 block number using timestamp."""
+        # Get timestamp from L1 block
+        timestamp = await self.bc.get_blocktime(l1_chain_id, l1_block_number)
+        # Get L3 block at that timestamp
+        l3_block_number = await self.bc_staking.last_block_before_timestamp(510003, timestamp) # TODO - make this dynamic based on the chain id
+        return l3_block_number
+
     async def overwrite_votes(self, votes, proposal_id, gcs_client: 'GCSClient'):
 
         blob_name = self.votes_blob_name(proposal_id)
@@ -273,7 +283,51 @@ class Sync:
             rows = await connection.fetch(qry)
             return [dict(r) for r in rows]
     
-    async def get_vp_snapshot_all_delegates(self, block_number, gcs_client: 'GCSClient', reset=False):
+    async def get_staking_vp_at_block(self, l1_block_number, l1_chain_id):
+        # Convert L1 block to L3 block for staking API
+        l3_block_number = await self.convert_l1_block_to_l3_block(l1_block_number, l1_chain_id)
+        print(f"Converting L1 block {l1_block_number} (chain {l1_chain_id}) to L3 block {l3_block_number} for staking API")
+
+        url = f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/staking/all-stakes/at-block/{l3_block_number}"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url)
+                if response.status_code == 404:
+                    return {}
+                response.raise_for_status()
+                data = response.json()
+                stakes = {addr.lower(): int(amount) for addr, amount in data.get('stakes', {}).items()}
+                if stakes:
+                    print(f"Fetched {len(stakes)} staking positions at L3 block {l3_block_number} (L1 block {l1_block_number})")
+                return stakes
+        except Exception as e:
+            print(f"Could not fetch staking data: {e}")
+            return {}
+
+    async def get_total_staking_at_block(self, l1_block_number, l1_chain_id):
+        # Convert L1 block to L3 block for staking API
+        l3_block_number = await self.convert_l1_block_to_l3_block(l1_block_number, l1_chain_id)
+        print(f"Converting L1 block {l1_block_number} (chain {l1_chain_id}) to L3 block {l3_block_number} for staking API")
+
+        url = f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/staking/total/at-block/{l3_block_number}"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url)
+                if response.status_code == 404:
+                    return 0
+                response.raise_for_status()
+                data = response.json()
+                total_stake = int(data.get('total_stake', 0))
+                if total_stake > 0:
+                    print(f"Fetched total staking: {total_stake} at L3 block {l3_block_number} (L1 block {l1_block_number})")
+                return total_stake
+        except Exception as e:
+            print(f"Could not fetch total staking data: {e}")
+            return 0
+
+    async def get_vp_snapshot_all_delegates(self, block_number, gcs_client: 'GCSClient', chain_id=None, reset=False):
 
         blob_name = self.vp_snapshot_blob_name(block_number)
 
@@ -285,7 +339,44 @@ class Sync:
             except:
                 pass
 
-        data = await self.get_vp_snapshot_all_delegates_from_db(block_number)
+        # Get delegation VP from database
+        delegation_data = await self.get_vp_snapshot_all_delegates_from_db(block_number)
+
+        # Get staking VP from API (only if chain_id is provided)
+        if chain_id is not None:
+            staking_stakes = await self.get_staking_vp_at_block(block_number, chain_id)
+        else:
+            staking_stakes = {}
+
+        # Merge both sources
+        vp_dict = {}
+
+        # Add delegation VP
+        for entry in delegation_data:
+            addr = entry['addr'].lower()
+            vp_dict[addr] = {
+                'addr': addr,
+                'vp': str(entry['vp'])
+            }
+
+        # Add/merge staking VP
+        for addr, staked_amount in staking_stakes.items():
+            if addr in vp_dict:
+                # Has both delegation and staking
+                delegated = int(vp_dict[addr]['vp'])
+                total = delegated + staked_amount
+                vp_dict[addr]['vp'] = str(total)
+            else:
+                # Only staking (no delegations to them)
+                vp_dict[addr] = {
+                    'addr': addr,
+                    'vp': str(staked_amount)
+                }
+
+        data = list(vp_dict.values())
+
+        if staking_stakes:
+            print(f"Merged VP: {len(data)} delegates (including {len(staking_stakes)} with staking)")
 
         await gcs_client.upload_ndjson(data, blob_name)
 

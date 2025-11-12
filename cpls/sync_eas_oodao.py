@@ -75,7 +75,7 @@ class EASOoDaoSync(Sync):
             row = await connection.fetchrow(f"""select min(quorum::numeric)::text min_quorum_pct, max(quorum::numeric)::text max_quorum_pct, min(approval_threshold::numeric)::text min_approval_threshold_pct, max(approval_threshold::numeric)::text max_approval_threshold_pct from {self.infra_dao_slug}.proposal_types where contract = '{self.oodao_dao_id}';""")
             return row
         
-    async def read_snapshot_votable_supply(self, block_number):
+    async def read_snapshot_votable_supply(self, block_number, chain_id):
 
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
@@ -83,7 +83,15 @@ class EASOoDaoSync(Sync):
             # This only works if the token has a different address on different chains.
             row = await connection.fetchrow(qry)
             vp = int(row['votable_supply'])
-            return vp
+            print(vp)
+
+        total_staking = await self.get_total_staking_at_block(block_number, chain_id)
+        total_votable_supply = vp + total_staking
+        
+        if total_staking > 0:
+            print(f"Total votable supply: {vp} (DB) + {total_staking} (staking) = {total_votable_supply}")
+        
+        return total_votable_supply
 
 
     async def read_proposal_type(self, proposal_id):
@@ -342,13 +350,41 @@ class EASOoDaoSync(Sync):
 
 
             if start_block > 0: # For OODAO, this means a block number is known.
-                proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block))
+                proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block, proposal['chain_id']))
 
                 if self.delegate_metadata is None:
                     self.delegate_metadata = await self.get_delegate_metadata()
 
                 if not reuse_tally:
-                    snapshot_vp = await self.get_vp_snapshot_all_delegates(start_block, gcs_client)
+                    snapshot_vp = await self.get_vp_snapshot_all_delegates(start_block, gcs_client, chain_id=proposal['chain_id'])
+
+                    snapshot_vp_lookup = {row['addr'].lower(): row for row in snapshot_vp}
+
+                    votes_out_updated = []
+                    outcome_updated = defaultdict(lambda: defaultdict(int))
+
+                    for vote in votes_out:
+                        addr = vote['voter'].lower()
+                        vp_entry = snapshot_vp_lookup.get(addr)
+
+                        if vp_entry:
+                            # Update vote weight with actual VP (delegation + staking)
+                            vote['weight'] = vp_entry['vp']
+                            vote_weight = int(vp_entry['vp'])
+                        else:
+                            # Keep original weight if not in snapshot
+                            vote_weight = int(vote['weight'])
+
+                        # Recalculate outcome with correct VP
+                        outcome_updated['token-holders'][int(vote.get('support', 0))] += vote_weight
+                        votes_out_updated.append(vote)
+
+                    # Update outcome with recalculated values
+                    for key in outcome_updated['token-holders'].keys():
+                        outcome['token-holders'][str(key)] = str(outcome_updated['token-holders'][key])
+
+                    # Overwrite votes with VP-enriched data
+                    await self.overwrite_votes(votes_out_updated, proposal_id, gcs_client)
 
                     snapshot_vp_out = []
                     for row in snapshot_vp:
@@ -357,7 +393,7 @@ class EASOoDaoSync(Sync):
 
                             addr = row['addr'].lower()
                             record = copy.deepcopy(row)
-                            
+
                             try:
                                 ens = await self.bc.get_ens_lru(addr)
                                 if ens is not None:
@@ -368,8 +404,8 @@ class EASOoDaoSync(Sync):
                             delegate_metadata = self.delegate_metadata.get(addr, {})
 
                             record.update(delegate_metadata)
-                            
-                            snapshot_vp_out.append(record)                        
+
+                            snapshot_vp_out.append(record)
 
 
                     await self.overwrite_hasnt_voted(snapshot_vp_out, proposal_id, gcs_client)
