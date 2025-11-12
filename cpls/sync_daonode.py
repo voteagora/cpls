@@ -347,6 +347,8 @@ class DaoNodeSync(Sync):
                                             '115203962227058139384278248635798144936351291766909949005270484145680009554500']
                 OPTIMISM_PASSED_PROPOSALS = ['71928632649116715308847337447543955907072794738294227130170691217045092512147']
 
+                XAI_PASSED_PROPOSALS = ['20614392243564088742464409537383874990606524118041119115074261643588472416818']
+
                 # This is a known issue with Optimism, where the proposal is marked as "succeeded" but it's not really succeeded, the onchain stage is 1 (active) 1 block after it ended, but 3 (defeated) at a random block in Oct 2025.
                 OPTIMISM_CORRUPTED_PROPOSALS_MARKED_SUCCEEDED_I_GUESS = ['103713749716503028671815481721039004389156473487450783632177114353117435138377',
                                                                          '2808108363564117434228597137832979672586627356483314020876637262618986508713',
@@ -368,7 +370,7 @@ class DaoNodeSync(Sync):
                     proposal['lifecycle_stage'] = 'SUCCEEDED'
                     liveness = 'archived'
 
-                if proposal['id'] in CYBER_PASSED_PROPOSALS + SCROLL_PASSED_PROPOSALS + OPTIMISM_PASSED_PROPOSALS:
+                if proposal['id'] in XAI_PASSED_PROPOSALS + CYBER_PASSED_PROPOSALS + SCROLL_PASSED_PROPOSALS + OPTIMISM_PASSED_PROPOSALS:
                     proposal['lifecycle_stage'] = 'PASSED'
                     liveness = 'archived'
                 
@@ -435,7 +437,7 @@ class DaoNodeSync(Sync):
                                 proposal['lifecycle_stage'] = 'SUCCEEDED'
                         
                         else:
-                            raise Exception(f"Unhandled proposal lifecycle stage {stage} vs {fresh_stage} for proposal_id: {proposal_id}")
+                            raise Exception(f"Unhandled proposal lifecycle stage {stage} for proposal_id: {proposal_id}")
 
                     elif proposal['start_blocktime'] < curtime < proposal['end_blocktime']:
                         # We know it's, because if it was cancelled, we would have picked up the CANCEL event.
