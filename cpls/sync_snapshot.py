@@ -12,7 +12,7 @@ from typing import List
 
 class SnapshotGraphQLClient:
 
-    def __init__(self, tenant):
+    def __init__(self, tenant, http_client: httpx.AsyncClient = None):
         self.url = "https://hub.snapshot.org/graphql"
         self.tenant = tenant
         self.space = {'ens' : 'ens.eth',
@@ -21,6 +21,7 @@ class SnapshotGraphQLClient:
                       'etherfi' : 'etherfi-dao.eth'}[tenant]
 
         self.page_size = 1000
+        self.client = http_client if http_client is not None else httpx.AsyncClient()
 
     async def get_votes(self, on_or_after) -> List:
 
@@ -46,9 +47,8 @@ class SnapshotGraphQLClient:
                 }
                 """ % (self.space, on_or_after, self.page_size)
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(self.url, json={'query': QUERY})
-            payload = resp.json()['data']['items']
+        resp = await self.client.post(self.url, json={'query': QUERY})
+        payload = resp.json()['data']['items']
 
         return payload
 
@@ -84,9 +84,8 @@ class SnapshotGraphQLClient:
                     }
                     """ % self.space
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(self.url, json={'query': QUERY})
-            payload = resp.json()['data']['items']
+        resp = await self.client.post(self.url, json={'query': QUERY})
+        payload = resp.json()['data']['items']
 
         return payload
 
@@ -95,12 +94,12 @@ class SnapshotGraphQLClient:
 class SnapshotSync(Sync):
 
     SOURCE = 'snapshot'
-    
-    def __init__(self, infra_dao_slug, config=None, reset=False):
 
-        super().__init__(infra_dao_slug, config, reset)
+    def __init__(self, infra_dao_slug, config=None, reset=False, http_client=None):
 
-        self.sc = SnapshotGraphQLClient(self.infra_dao_slug)
+        super().__init__(infra_dao_slug, config, reset, http_client)
+
+        self.sc = SnapshotGraphQLClient(self.infra_dao_slug, http_client)
 
     def govless_proposal_blob_name(self, proposal_id):
         return f"data/{self.infra_dao_slug}/proposal/{self.SOURCE}/raw/{proposal_id}.json.gz"

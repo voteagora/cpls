@@ -15,6 +15,9 @@ class EASAtlasSync(Sync):
 
     SOURCE = 'eas-atlas'
 
+    def __init__(self, infra_dao_slug, config=None, reset=False, http_client=None):
+        super().__init__(infra_dao_slug, config, reset, http_client)
+
     async def read_votes(self, proposal_id):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:

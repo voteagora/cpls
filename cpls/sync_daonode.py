@@ -11,10 +11,10 @@ from .title_processor import get_title_from_proposal_description
 class DaoNodeSync(Sync):
 
     SOURCE = 'dao_node'
-    
-    def __init__(self, infra_dao_slug, config=None, reset=False):
 
-        super().__init__(infra_dao_slug, config, reset)
+    def __init__(self, infra_dao_slug, config=None, reset=False, http_client=None):
+
+        super().__init__(infra_dao_slug, config, reset, http_client)
 
         try:
             self.index_tenant_prefix = self.config['index_tenant_prefix']
@@ -89,7 +89,7 @@ class DaoNodeSync(Sync):
                     await gcs_client.upload_dict(ens_data, self.ens_blob_name(1))
 
 
-    async def refresh_list(self, gcs_client: 'GCSClient', http_client: 'httpx.AsyncClient'):
+    async def refresh_list(self, gcs_client: 'GCSClient'):
 
         self.bc.clear_lru()
         self.delegate_metadata = None
@@ -102,10 +102,10 @@ class DaoNodeSync(Sync):
         chain_id = self.chain_id
         gov_addr = self.gov_addr
 
-        response = await http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/progress")
+        response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/progress")
         some_pretty_recent_block = response.json()['block']
 
-        response = await http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposals")
+        response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposals")
         proposals = response.json()['proposals']
 
         anything_changed = False
@@ -133,7 +133,7 @@ class DaoNodeSync(Sync):
 
 
             try:
-                response = await http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposal/{proposal_info['id']}")
+                response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposal/{proposal_info['id']}")
                 proposal = response.json()['proposal']
             except Exception as e:
                 print("Proposal fetch failed, we can't proceed, we're blind.  We don't want to corrupt in case of the source pruning.")

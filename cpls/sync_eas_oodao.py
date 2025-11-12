@@ -40,9 +40,9 @@ class EASOoDaoSync(Sync):
 
     SOURCE = 'eas-oodao'
 
-    def __init__(self, infra_dao_slug, config=None, reset=False):
+    def __init__(self, infra_dao_slug, config=None, reset=False, http_client=None):
 
-        super().__init__(infra_dao_slug, config, reset)
+        super().__init__(infra_dao_slug, config, reset, http_client)
 
         try:
 

@@ -207,13 +207,13 @@ class JobQueue:
 
                 print("Handling {source} for {infra_dao_slug}".format(source=source, infra_dao_slug=infra_dao_slug))
                 if source == 'dao_node':
-                    stats = await DaoNodeSync(infra_dao_slug, config, reset).refresh_list(gcs_client, self.http_client)
+                    stats = await DaoNodeSync(infra_dao_slug, config, reset, self.http_client).refresh_list(gcs_client)
                 elif source == 'eas-atlas':
-                    stats = await EASAtlasSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
+                    stats = await EASAtlasSync(infra_dao_slug, config, reset, self.http_client).refresh_list(gcs_client)
                 elif source == 'eas-oodao':
-                    stats = await EASOoDaoSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
+                    stats = await EASOoDaoSync(infra_dao_slug, config, reset, self.http_client).refresh_list(gcs_client)
                 elif source == 'snapshot':
-                    stats = await SnapshotSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
+                    stats = await SnapshotSync(infra_dao_slug, config, reset, self.http_client).refresh_list(gcs_client)
                 else:
                     raise Exception(f"Unknown source: {source}")
                 

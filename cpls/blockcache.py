@@ -8,10 +8,10 @@ class BlockNotFound(Exception):
     pass
 
 class BlockCacheClient:
-    def __init__(self, base_url, alchemy_api_key):
+    def __init__(self, base_url, alchemy_api_key, http_client: httpx.AsyncClient = None):
         self.base_url = base_url
         self.alchemy_api_key = alchemy_api_key
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self.client = http_client if http_client is not None else httpx.AsyncClient(timeout=30.0)
 
         self.logr = logging.getLogger("cpls.blockcache")
 
