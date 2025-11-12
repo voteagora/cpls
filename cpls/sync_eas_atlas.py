@@ -136,6 +136,9 @@ class EASAtlasSync(Sync):
                             options =json.loads(support)
                             for option in options:
                                 outcome[vote['citizen_type']][option][1] += int(vote['weight'])
+                    
+                    else:
+                        raise Exception("Unknown EAS-Atlas proposal type %s for proposal id %s" % (proposal_type, proposal_id))
 
                     await self.overwrite_votes(votes, proposal_id, gcs_client)
 
