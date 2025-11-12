@@ -41,7 +41,7 @@ class JobRequest(BaseModel):
     payload: Dict
 
 def create_http_client():
-    timeout = httpx.Timeout(15, connect=15)
+    timeout = httpx.Timeout(60, connect=60)
     limits = httpx.Limits(max_connections=15 * 6, max_keepalive_connections=20)
     return httpx.AsyncClient(timeout=timeout, limits=limits)
 
