@@ -114,73 +114,71 @@ class SnapshotSync(Sync):
         self.bc.clear_lru()
         self.delegate_metadata = None
 
-        async with httpx.AsyncClient() as http_client:
+        proposals = await self.sc.get_proposals()
 
-            proposals = await self.sc.get_proposals()
+        anything_changed = False
+        skipped_count = 0
+        refreshed_count = 0
 
-            anything_changed = False
-            skipped_count = 0
-            refreshed_count = 0
+        for i, proposal in enumerate(proposals):
+        
+            print(f"Proposal {i+1} of {len(proposals)}")
+            proposal_id = proposal['id']
 
-            for i, proposal in enumerate(proposals):
-            
-                print(f"Proposal {i+1} of {len(proposals)}")
-                proposal_id = proposal['id']
+            try:
+                blob, existing_liveness, existing_proposal_hash, existing_num_of_votes  = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
+            except SkipProposal as e:
+                print(e)
+                skipped_count += 1
+                continue
 
-                try:
-                    blob, existing_liveness, existing_proposal_hash, existing_num_of_votes  = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
-                except SkipProposal as e:
-                    print(e)
-                    skipped_count += 1
-                    continue
+            if existing_liveness == 'archived' and not self.reset:
+                continue
+        
+            proposal['description'] = proposal['body']
+            del proposal['body']
 
-                if existing_liveness == 'archived' and not self.reset:
-                    continue
-            
-                proposal['description'] = proposal['body']
-                del proposal['body']
+            curtime = int(time.time())
+            # These are needed for cache busting.
+            proposal['after_start_time'] = proposal['start'] > curtime
+            proposal['after_end_time'] = proposal['end'] > curtime
 
-                curtime = int(time.time())
-               # These are needed for cache busting.
-                proposal['after_start_time'] = proposal['start'] > curtime
-                proposal['after_end_time'] = proposal['end'] > curtime
+            try:
+                proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
+            except SkipProposal as e:
+                print(e)
+                skipped_count += 1
+                continue
 
-                try:
-                    proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
-                except SkipProposal as e:
-                    print(e)
-                    skipped_count += 1
-                    continue
+            num_of_votes = proposal['votes']
+            proposal['num_of_votes'] = num_of_votes
+            del proposal['votes']
 
-                num_of_votes = proposal['votes']
-                proposal['num_of_votes'] = num_of_votes
-                del proposal['votes']
+            # No new votes have come in, we can re-use the last tally
+            reuse_tally = existing_num_of_votes > 0 and (existing_num_of_votes == num_of_votes) and (not self.reset)
 
-                # No new votes have come in, we can re-use the last tally
-                reuse_tally = existing_num_of_votes > 0 and (existing_num_of_votes == num_of_votes) and (not self.reset)
+            liveness = 'live'
 
-                liveness = 'live'
+            anything_changed = True
+            refreshed_count += 1
 
-                anything_changed = True
-                refreshed_count += 1
+            # This section here, enriches the proposal object, in a way that will only update,
+            # if the hash for the proposal's state changes. Downstream consumers can either use it, accepting
+            # the caveate, or re-calculate it.
 
-                # This section here, enriches the proposal object, in a way that will only update,
-                # if the hash for the proposal's state changes. Downstream consumers can either use it, accepting
-                # the caveate, or re-calculate it.
+            proposal['end_blocktime'] = proposal['end']
+            proposal['start_blocktime'] = proposal['start']
 
-                proposal['end_blocktime'] = proposal['end']
-                proposal['start_blocktime'] = proposal['start']
+            if proposal['state'] == 'closed':
+                liveness = 'archived'
+            else:
+                raise Exception("Proposal state is not closed, this is a bug.")
 
-                if proposal['state'] == 'closed':
-                    liveness = 'archived'
-                else:
-                    raise Exception("Proposal state is not closed, this is a bug.")
+            await self.overwrite_proposal(proposal, proposal_hash, liveness, gcs_client)
 
-                await self.overwrite_proposal(proposal, proposal_hash, liveness, gcs_client)
-
-            if anything_changed or self.reset:
-                await self.refresh_source_list(gcs_client)
-                await self.refresh_full_list(gcs_client)
+        if anything_changed or self.reset:
+            await self.refresh_source_list(gcs_client)
+            await self.refresh_full_list(gcs_client)
 
         print (f"Refreshed {refreshed_count} proposals, skipped {skipped_count}")
         return {

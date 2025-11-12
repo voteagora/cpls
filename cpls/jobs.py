@@ -6,6 +6,7 @@ from typing import Dict, Optional, List, TYPE_CHECKING
 from datetime import datetime
 from pydantic import BaseModel
 from enum import Enum
+import httpx
 
 from .sync_snapshot import SnapshotSync
 from .sync_daonode import DaoNodeSync
@@ -39,6 +40,10 @@ class JobRequest(BaseModel):
     type: str
     payload: Dict
 
+async def create_http_client():
+    timeout = httpx.Timeout(connect=10.0, write=10.0, read=30.0)
+    limits = httpx.Limits(max_connections=50, max_keepalive_connections=20)
+    return httpx.AsyncClient(timeout=timeout, limits=limits)
 
 class JobQueue:
     def __init__(self, num_workers: int = 4):
@@ -50,6 +55,8 @@ class JobQueue:
         self.dao_locks: Dict[str, asyncio.Lock] = {}
         self.worker_tasks: List[asyncio.Task] = []
         self.workers_ready = asyncio.Event()
+
+        self.http_client = create_http_client()
 
     def _get_dao_lock(self, dao_slug: str) -> asyncio.Lock:
         """Get or create a lock for a specific DAO"""
@@ -181,6 +188,8 @@ class JobQueue:
         total_refreshed = 0
         stats_by_source = {}
 
+        gcs_client = GCSClient(GCS_BUCKET_NAME)
+        
         for source in job.payload['sources']:
 
             stats = {
@@ -190,7 +199,6 @@ class JobQueue:
 
             infra_dao_slug = job.payload['infra_dao_slug']
             config = job.payload['config']
-            gcs_client = GCSClient(GCS_BUCKET_NAME)
 
             print(f"Job ID: {job}")
 
@@ -199,7 +207,7 @@ class JobQueue:
 
                 print("Handling {source} for {infra_dao_slug}".format(source=source, infra_dao_slug=infra_dao_slug))
                 if source == 'dao_node':
-                    stats = await DaoNodeSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
+                    stats = await DaoNodeSync(infra_dao_slug, config, reset).refresh_list(gcs_client, self.http_client)
                 elif source == 'eas-atlas':
                     stats = await EASAtlasSync(infra_dao_slug, config, reset).refresh_list(gcs_client)
                 elif source == 'eas-oodao':
