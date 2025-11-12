@@ -50,9 +50,9 @@ class DaoNodeSync(Sync):
         return f"data/{self.infra_dao_slug}/proposal/eas-atlas/raw/{proposal_id}.json.gz"
 
     def govless_votes_blob_name(self, proposal_id):
-        return f"data/{self.infra_dao_slug}/votes/eas-atlas/{proposal_id}.ndjson.gz"    
+        return f"data/{self.infra_dao_slug}/votes/{proposal_id}.ndjson.gz"    
     def govless_hasnt_voted_blob_name(self, proposal_id):
-        return f"data/{self.infra_dao_slug}/hasnt_voted/eas-atlas/{proposal_id}.ndjson.gz"
+        return f"data/{self.infra_dao_slug}/hasnt_voted/{proposal_id}.ndjson.gz"
     
     def ens_blob_name(self, chain_id):
         return f"ensdomains/{chain_id}.json.gz"

@@ -103,9 +103,6 @@ class SnapshotSync(Sync):
 
     def govless_proposal_blob_name(self, proposal_id):
         return f"data/{self.infra_dao_slug}/proposal/{self.SOURCE}/raw/{proposal_id}.json.gz"
-
-    def govless_votes_blob_name(self, proposal_id):
-        return f"data/{self.infra_dao_slug}/votes/{self.SOURCE}/{proposal_id}.ndjson.gz"    
     
 
     async def refresh_list(self, gcs_client: 'GCSClient'):
