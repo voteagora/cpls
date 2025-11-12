@@ -119,7 +119,7 @@ class EASAtlasSync(Sync):
 
                 else:
 
-                    if proposal_type in ('OPTIMISTIC', 'STANDARD'):
+                    if proposal_type in ('OPTIMISTIC', 'STANDARD', 'OPTIMISTIC_TIERED'):
 
                         outcome = defaultdict(lambda: defaultdict(int))
 
