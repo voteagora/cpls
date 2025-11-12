@@ -79,7 +79,6 @@ class EASAtlasSync(Sync):
                     print(f"Failed to fetch proposal {proposals_uid}, on {chain_id}, cause 0x00000")
                     continue
 
-
                 proposal = proposal_attestation['attestation']
                 proposal['chain_id'] = proposal_attestation['chain_id']
                 proposal.update(proposal_attestation['decoded_data'])
@@ -114,8 +113,7 @@ class EASAtlasSync(Sync):
                     existing_proposal_data = await gcs_client.read_dict(blob.name)
 
                     if existing_proposal_data is None:
-                        print("We got None for existing_proposal_data for %s, this shouldn't be possible" % proposal_id)
-                        reuse_tally = False
+                        raise Exception("We got None for existing_proposal_data for %s, this shouldn't be possible" % blob.name)
                     
                     outcome = existing_proposal_data['outcome']
 

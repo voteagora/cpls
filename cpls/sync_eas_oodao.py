@@ -267,8 +267,7 @@ class EASOoDaoSync(Sync):
                 existing_proposal_data = await gcs_client.read_dict(blob.name)
 
                 if existing_proposal_data is None:
-                    print("We got None for existing_proposal_data for %s, this shouldn't be possible" % proposal_id)
-                    reuse_tally = False
+                    raise Exception("We got None for existing_proposal_data for %s, this shouldn't be possible" % blob.name)
                 
                 outcome = existing_proposal_data['outcome']
 

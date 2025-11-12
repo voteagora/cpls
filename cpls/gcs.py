@@ -167,9 +167,6 @@ class GCSClient:
             # Download compressed blob
             blob_data = self.bucket.blob(blob_name)
 
-            if not blob_data.exists():
-                return None
-
             if must_uncompress:
                 compressed_data = blob_data.download_as_bytes()
                 json_data = gzip.decompress(compressed_data).decode()
@@ -181,8 +178,7 @@ class GCSClient:
             return data
 
         except Exception as e:
-            print(f"Failed to read data from GCS blob {blob_name}: {e}")
-            return None
+            raise Exception(f"Failed to read JSON data from GCS blob {blob_name}: {e}")
 
     async def upload_ndjson(self, data: List[Dict], blob_name: str, cache_control: Optional[str] = None, metadata: Optional[Dict[str, str]] = None) -> bool:
         """
@@ -248,8 +244,7 @@ class GCSClient:
             return True
 
         except Exception as e:
-            print(f"Failed to upload NDJSON to GCS blob {blob_name}: {e}")
-            return False
+            raise Exception(f"Failed to upload NDJSON to GCS blob {blob_name}: {e}")
 
     async def read_ndjson(self, blob_name: str) -> Optional[List[Dict]]:
         """
@@ -273,10 +268,6 @@ class GCSClient:
             # Download compressed blob
             blob_data = self.bucket.blob(blob_name)
 
-            if not blob_data.exists():
-                print(f"Blob {blob_name} does not exist")
-                return None
-
             # Ensure blob name ends with .json
             must_uncompress = blob_name.endswith('.gz')
 
@@ -292,13 +283,10 @@ class GCSClient:
                 if line.strip():  # Skip empty lines
                     data.append(json.loads(line))
 
-            print(f"Successfully read {len(data)} records from GCS: {blob_name}")
-
             return data
 
         except Exception as e:
-            print(f"Failed to read NDJSON from GCS blob {blob_name}: {e}")
-            return None
+            raise Exception(f"Failed to read NDJSON from GCS blob {blob_name}: {e}")
 
     async def upload_job_result(self, job: 'Job'):
         """Upload job result as gzipped JSON to GCS (legacy method for compatibility)"""
