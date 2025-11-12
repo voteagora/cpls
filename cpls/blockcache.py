@@ -99,10 +99,11 @@ class BlockCacheClient:
 
     async def contract_call(self, chain_id, contract_address, method_signature, block_number, data):
         headers = self.headers()
-        url = self.base_url + f"/contract_call/{chain_id}/{contract_address}/{method_signature}"
+        url = self.base_url + f"/contract_call/{chain_id}/{contract_address}"
         payload = {
             "block_number": block_number,
-            "data": data
+            "data": data,
+            "method_signature": method_signature
         }
         resp = await self.client.post(url, headers=headers, json=payload)
         resp.raise_for_status()
