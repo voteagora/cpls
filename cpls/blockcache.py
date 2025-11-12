@@ -1,6 +1,8 @@
+
 import httpx
 from eth_abi import encode
 import copy
+import logging
 
 class BlockNotFound(Exception):
     pass
@@ -10,6 +12,10 @@ class BlockCacheClient:
         self.base_url = base_url
         self.alchemy_api_key = alchemy_api_key
         self.client = httpx.AsyncClient(timeout=30.0)
+
+        self.logr = logging.getLogger("cpls.blockcache")
+
+
         self.cached_ens = {}
 
     def clear_lru(self):
@@ -113,6 +119,8 @@ class BlockCacheClient:
             data = str(encoded_params.hex()).removeprefix("0x")
         else:
             data = ''
+
+        self.logr.info(f"Calling contract {contract_address} with method {method_signature} and data {data} (from {values}) at block {block_number} for chain {chain_id} and address {contract_address}")
 
         # Call the lower-level contract_call method
         result = await self.contract_call(chain_id, contract_address, method_signature, block_number, data)
