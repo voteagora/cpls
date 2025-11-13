@@ -36,14 +36,9 @@ async def scheduled_proposal_job(config: Dict, infra_dao_slug: str):
 
     sources = []
 
-    print("Config:")
-    print(config['features'])
-
     assert isinstance(config['features'].get('oodao', False), bool)
     assert isinstance(config['features'].get('snapshot_proposals', False), bool)
     assert isinstance(config['features'].get('dao_node_proposals', False), bool)
-
-    print(config['features'].get('dao_node_proposals', False))
 
     if config['features'].get('oodao', False):
         sources.append('eas-oodao')
