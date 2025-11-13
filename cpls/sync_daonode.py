@@ -75,40 +75,6 @@ class DaoNodeSync(Sync):
         return f"data/{self.infra_dao_slug}/votes/{proposal_id}.ndjson.gz"    
     def govless_hasnt_voted_blob_name(self, proposal_id):
         return f"data/{self.infra_dao_slug}/hasnt_voted/{proposal_id}.ndjson.gz"
-    
-    def ens_blob_name(self, chain_id):
-        return f"ensdomains/{chain_id}.json.gz"
-
-    
-    async def refresh_ens(self, gcs_client: 'GCSClient'):
-
-        ens_data = await gcs_client.read_dict(self.ens_blob_name(1))
-
-        print(len(ens_data))
-
-        if ens_data is None:
-            ens_data = {}
-
-        cur_time = int(time.time() / (24 / 60 / 60))
-
-        hasnt_voted_blobs = await gcs_client.list_blobs(prefix=f"data/{self.infra_dao_slug}/hasnt_voted/")
-
-        cnt = 0
-
-        for blob in enumerate(hasnt_voted_blobs):
-            hasnt_voted = await gcs_client.read_ndjson(blob.name)
-            cnt +=1
-
-            for j, row in enumerate(hasnt_voted):
-                ens, cache_time = ens_data.get(row['addr'], (None, cur_time))
-
-                if ens is None or (cur_time - cache_time > 1):
-                    ens = await self.bc.get_ens(row['addr'], 1)
-
-                ens_data[row['addr']] = ens, cache_time
-
-                if (j % 1000) == 0:
-                    await gcs_client.upload_dict(ens_data, self.ens_blob_name(1))
 
     @daonode_retry
     async def _fetch_progress(self):

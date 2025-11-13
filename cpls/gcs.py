@@ -257,8 +257,7 @@ class GCSClient:
             List[Dict] if successful, None otherwise
         """
         if not self.client:
-            print("GCS client not available, cannot read")
-            return None
+            raise Exception("GCS client not available, cannot read")
 
         try:
             assert ".ndjson" in blob_name, "Blob name must end with '.ndjson.gz' or '.ndjson'"

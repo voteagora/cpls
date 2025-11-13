@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 import yaml
+import httpx
 
 load_dotenv()
 
@@ -81,3 +82,9 @@ def load_tenant_configs():
 def load_tenant_config(dao_infra_slug):
     configs = load_tenant_configs()
     return configs[dao_infra_slug]
+
+def create_http_client():
+    timeout = httpx.Timeout(60, connect=60)
+    limits = httpx.Limits(max_connections=15 * 6, max_keepalive_connections=20)
+    return httpx.AsyncClient(timeout=timeout, limits=limits)
+

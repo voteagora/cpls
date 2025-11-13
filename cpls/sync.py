@@ -260,7 +260,7 @@ class Sync:
         qry = f"""with qry as (select distinct on (delegate) delegate as addr, {col} as vp 
                         from auazure.{self.index_tenant_prefix}_token_delegate_votes_changed 
                         where
-                        address = '{self.token_addr}' 
+                        address = '{self.token_addr.lower()}' 
                         and block_number <= {block_number}
                         ORDER BY delegate, block_number desc)
             
@@ -319,14 +319,20 @@ class Sync:
 if __name__ == "__main__":
 
     import asyncio
+    from .config import create_http_client
 
     from .sync_daonode import DaoNodeSync
     from .sync_eas_atlas import EASAtlasSync
     from .sync_eas_oodao import EASOoDaoSync
 
-    dns = EASOoDaoSync('jeffdao', reset=True)
+    # dns = EASOoDaoSync('jeffdao', reset=True)
     # dns = EASAtlasSync('optimism', reset=True)
-    # dns = DaoNodeSync('scroll', reset=False)
+
+    config = load_tenant_config('uniswap')
+
+    http_client = create_http_client()
+
+    dns = DaoNodeSync('uniswap', config, reset=True, http_client=http_client)
 
     gcs_client = GCSClient(GCS_BUCKET_NAME)
 

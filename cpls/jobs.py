@@ -16,7 +16,7 @@ from .sync_eas_oodao import EASOoDaoSync
 import requests as r
 
 from .gcs import GCSClient
-from .config import GCS_BUCKET_NAME
+from .config import GCS_BUCKET_NAME, create_http_client
 
 class JobStatus(str, Enum):
     PENDING = "pending"
@@ -39,11 +39,6 @@ class Job(BaseModel):
 class JobRequest(BaseModel):
     type: str
     payload: Dict
-
-def create_http_client():
-    timeout = httpx.Timeout(60, connect=60)
-    limits = httpx.Limits(max_connections=15 * 6, max_keepalive_connections=20)
-    return httpx.AsyncClient(timeout=timeout, limits=limits)
 
 class JobQueue:
     def __init__(self, num_workers: int = 4):

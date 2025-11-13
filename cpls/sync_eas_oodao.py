@@ -79,12 +79,10 @@ class EASOoDaoSync(Sync):
 
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            qry = f"""select {self.infra_dao_slug}.get_votable_supply_at_block({block_number}, '{self.token_addr}') as votable_supply;"""
-            print(qry)
+            qry = f"""select {self.infra_dao_slug}.get_votable_supply_at_block({block_number}, '{self.token_addr.lower()}') as votable_supply;"""
             # This only works if the token has a different address on different chains.
             row = await connection.fetchrow(qry)
             vp = int(row['votable_supply'])
-            print(vp)
             return vp
 
 
