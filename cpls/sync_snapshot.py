@@ -1,18 +1,40 @@
 import copy
 import httpx, time
 import asyncio
+import logging
 from .gcs import GCSClient
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS
 
 from .title_processor import get_title_from_proposal_description
 
-
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+    after_log
+)
 
 from typing import List
 
+# Configure retry decorator for Snapshot GraphQL operations
+snapshot_retry = retry(
+    retry=retry_if_exception_type((
+        httpx.ReadError,
+        httpx.ConnectError,
+        httpx.TimeoutException,
+        httpx.RemoteProtocolError
+    )),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    stop=stop_after_attempt(3),
+    before_sleep=before_sleep_log(logging.getLogger("cpls.snapshot"), logging.WARNING),
+    after=after_log(logging.getLogger("cpls.snapshot"), logging.DEBUG)
+)
+
 class SnapshotGraphQLClient:
 
-    def __init__(self, tenant):
+    def __init__(self, tenant, http_client: httpx.AsyncClient = None):
         self.url = "https://hub.snapshot.org/graphql"
         self.tenant = tenant
         self.space = {'ens' : 'ens.eth',
@@ -21,7 +43,9 @@ class SnapshotGraphQLClient:
                       'etherfi' : 'etherfi-dao.eth'}[tenant]
 
         self.page_size = 1000
+        self.client = http_client if http_client is not None else httpx.AsyncClient()
 
+    @snapshot_retry
     async def get_votes(self, on_or_after) -> List:
 
         QUERY = """
@@ -46,12 +70,12 @@ class SnapshotGraphQLClient:
                 }
                 """ % (self.space, on_or_after, self.page_size)
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(self.url, json={'query': QUERY})
-            payload = resp.json()['data']['items']
+        resp = await self.client.post(self.url, json={'query': QUERY})
+        payload = resp.json()['data']['items']
 
         return payload
 
+    @snapshot_retry
     async def get_proposals(self) -> List:
 
         QUERY = """
@@ -84,9 +108,8 @@ class SnapshotGraphQLClient:
                     }
                     """ % self.space
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(self.url, json={'query': QUERY})
-            payload = resp.json()['data']['items']
+        resp = await self.client.post(self.url, json={'query': QUERY})
+        payload = resp.json()['data']['items']
 
         return payload
 
@@ -95,18 +118,15 @@ class SnapshotGraphQLClient:
 class SnapshotSync(Sync):
 
     SOURCE = 'snapshot'
-    
-    def __init__(self, infra_dao_slug, config=None, reset=False):
 
-        super().__init__(infra_dao_slug, config, reset)
+    def __init__(self, infra_dao_slug, config=None, reset=False, http_client=None):
 
-        self.sc = SnapshotGraphQLClient(self.infra_dao_slug)
+        super().__init__(infra_dao_slug, config, reset, http_client)
+
+        self.sc = SnapshotGraphQLClient(self.infra_dao_slug, http_client)
 
     def govless_proposal_blob_name(self, proposal_id):
         return f"data/{self.infra_dao_slug}/proposal/{self.SOURCE}/raw/{proposal_id}.json.gz"
-
-    def govless_votes_blob_name(self, proposal_id):
-        return f"data/{self.infra_dao_slug}/votes/{self.SOURCE}/{proposal_id}.ndjson.gz"    
     
 
     async def refresh_list(self, gcs_client: 'GCSClient'):
@@ -114,73 +134,71 @@ class SnapshotSync(Sync):
         self.bc.clear_lru()
         self.delegate_metadata = None
 
-        async with httpx.AsyncClient() as http_client:
+        proposals = await self.sc.get_proposals()
 
-            proposals = await self.sc.get_proposals()
+        anything_changed = False
+        skipped_count = 0
+        refreshed_count = 0
 
-            anything_changed = False
-            skipped_count = 0
-            refreshed_count = 0
+        for i, proposal in enumerate(proposals):
+        
+            print(f"Proposal {i+1} of {len(proposals)}")
+            proposal_id = proposal['id']
 
-            for i, proposal in enumerate(proposals):
-            
-                print(f"Proposal {i+1} of {len(proposals)}")
-                proposal_id = proposal['id']
+            try:
+                blob, existing_liveness, existing_proposal_hash, existing_num_of_votes  = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
+            except SkipProposal as e:
+                print(e)
+                skipped_count += 1
+                continue
 
-                try:
-                    blob, existing_liveness, existing_proposal_hash, existing_num_of_votes  = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
-                except SkipProposal as e:
-                    print(e)
-                    skipped_count += 1
-                    continue
+            if existing_liveness == 'archived' and not self.reset:
+                continue
+        
+            proposal['description'] = proposal['body']
+            del proposal['body']
 
-                if existing_liveness == 'archived' and not self.reset:
-                    continue
-            
-                proposal['description'] = proposal['body']
-                del proposal['body']
+            curtime = int(time.time())
+            # These are needed for cache busting.
+            proposal['after_start_time'] = proposal['start'] > curtime
+            proposal['after_end_time'] = proposal['end'] > curtime
 
-                curtime = int(time.time())
-               # These are needed for cache busting.
-                proposal['after_start_time'] = proposal['start'] > curtime
-                proposal['after_end_time'] = proposal['end'] > curtime
+            try:
+                proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
+            except SkipProposal as e:
+                print(e)
+                skipped_count += 1
+                continue
 
-                try:
-                    proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
-                except SkipProposal as e:
-                    print(e)
-                    skipped_count += 1
-                    continue
+            num_of_votes = proposal['votes']
+            proposal['num_of_votes'] = num_of_votes
+            del proposal['votes']
 
-                num_of_votes = proposal['votes']
-                proposal['num_of_votes'] = num_of_votes
-                del proposal['votes']
+            # No new votes have come in, we can re-use the last tally
+            reuse_tally = existing_num_of_votes > 0 and (existing_num_of_votes == num_of_votes) and (not self.reset)
 
-                # No new votes have come in, we can re-use the last tally
-                reuse_tally = existing_num_of_votes > 0 and (existing_num_of_votes == num_of_votes) and (not self.reset)
+            liveness = 'live'
 
-                liveness = 'live'
+            anything_changed = True
+            refreshed_count += 1
 
-                anything_changed = True
-                refreshed_count += 1
+            # This section here, enriches the proposal object, in a way that will only update,
+            # if the hash for the proposal's state changes. Downstream consumers can either use it, accepting
+            # the caveate, or re-calculate it.
 
-                # This section here, enriches the proposal object, in a way that will only update,
-                # if the hash for the proposal's state changes. Downstream consumers can either use it, accepting
-                # the caveate, or re-calculate it.
+            proposal['end_blocktime'] = proposal['end']
+            proposal['start_blocktime'] = proposal['start']
 
-                proposal['end_blocktime'] = proposal['end']
-                proposal['start_blocktime'] = proposal['start']
+            if proposal['state'] == 'closed':
+                liveness = 'archived'
+            else:
+                raise Exception("Proposal state is not closed, this is a bug.")
 
-                if proposal['state'] == 'closed':
-                    liveness = 'archived'
-                else:
-                    raise Exception("Proposal state is not closed, this is a bug.")
+            await self.overwrite_proposal(proposal, proposal_hash, liveness, gcs_client)
 
-                await self.overwrite_proposal(proposal, proposal_hash, liveness, gcs_client)
-
-            if anything_changed or self.reset:
-                await self.refresh_source_list(gcs_client)
-                await self.refresh_full_list(gcs_client)
+        if anything_changed or self.reset:
+            await self.refresh_source_list(gcs_client)
+            await self.refresh_full_list(gcs_client)
 
         print (f"Refreshed {refreshed_count} proposals, skipped {skipped_count}")
         return {

@@ -41,7 +41,7 @@ class SkipProposal(Exception):
         return f"[PROP-{self.proposal_id}] {self.reason}"
 
 class Sync:
-    def __init__(self, infra_dao_slug, config=None, reset=False):
+    def __init__(self, infra_dao_slug, config=None, reset=False, http_client=None):
 
         self.infra_dao_slug = infra_dao_slug
 
@@ -50,10 +50,11 @@ class Sync:
 
         self.config = config
         self.reset = reset
+        self.http_client = http_client
 
         self.pg = PostgreSQLClient(DATABASE_URL)
 
-        self.bc = BlockCacheClient(BLOCKCACHE_URL, ALCHEMY_API_KEY)
+        self.bc = BlockCacheClient(BLOCKCACHE_URL, ALCHEMY_API_KEY, http_client)
     def calc_cache_control(self, liveness):
 
         if liveness == 'live':

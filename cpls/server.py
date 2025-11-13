@@ -56,8 +56,7 @@ async def scheduled_proposal_job(config: Dict, infra_dao_slug: str):
 
     if config['features'].get('dao_node_proposals', False):
         sources.append('dao_node')
-    
-    print(sources)
+
 
     job_id = await job_queue.add_job(
         job_type="scheduled",
