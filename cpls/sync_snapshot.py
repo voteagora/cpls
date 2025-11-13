@@ -1,14 +1,36 @@
 import copy
 import httpx, time
 import asyncio
+import logging
 from .gcs import GCSClient
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS
 
 from .title_processor import get_title_from_proposal_description
 
-
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+    after_log
+)
 
 from typing import List
+
+# Configure retry decorator for Snapshot GraphQL operations
+snapshot_retry = retry(
+    retry=retry_if_exception_type((
+        httpx.ReadError,
+        httpx.ConnectError,
+        httpx.TimeoutException,
+        httpx.RemoteProtocolError
+    )),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    stop=stop_after_attempt(3),
+    before_sleep=before_sleep_log(logging.getLogger("cpls.snapshot"), logging.WARNING),
+    after=after_log(logging.getLogger("cpls.snapshot"), logging.DEBUG)
+)
 
 class SnapshotGraphQLClient:
 
@@ -23,6 +45,7 @@ class SnapshotGraphQLClient:
         self.page_size = 1000
         self.client = http_client if http_client is not None else httpx.AsyncClient()
 
+    @snapshot_retry
     async def get_votes(self, on_or_after) -> List:
 
         QUERY = """
@@ -52,6 +75,7 @@ class SnapshotGraphQLClient:
 
         return payload
 
+    @snapshot_retry
     async def get_proposals(self) -> List:
 
         QUERY = """

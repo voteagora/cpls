@@ -1,12 +1,34 @@
 import copy
 import httpx, time
 import asyncio
+import logging
 from .gcs import GCSClient
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS
 
 from .title_processor import get_title_from_proposal_description
 
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+    after_log
+)
 
+# Configure retry decorator for DaoNode API operations
+daonode_retry = retry(
+    retry=retry_if_exception_type((
+        httpx.ReadError,
+        httpx.ConnectError,
+        httpx.TimeoutException,
+        httpx.RemoteProtocolError
+    )),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    stop=stop_after_attempt(3),
+    before_sleep=before_sleep_log(logging.getLogger("cpls.daonode"), logging.WARNING),
+    after=after_log(logging.getLogger("cpls.daonode"), logging.DEBUG)
+)
 
 class DaoNodeSync(Sync):
 
@@ -88,6 +110,23 @@ class DaoNodeSync(Sync):
                 if (j % 1000) == 0:
                     await gcs_client.upload_dict(ens_data, self.ens_blob_name(1))
 
+    @daonode_retry
+    async def _fetch_progress(self):
+        """Fetch current progress from DaoNode API with retry"""
+        response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/progress")
+        return response.json()
+
+    @daonode_retry
+    async def _fetch_proposals(self):
+        """Fetch all proposals from DaoNode API with retry"""
+        response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposals")
+        return response.json()
+
+    @daonode_retry
+    async def _fetch_proposal_detail(self, proposal_id):
+        """Fetch single proposal detail from DaoNode API with retry"""
+        response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposal/{proposal_id}")
+        return response.json()
 
     async def refresh_list(self, gcs_client: 'GCSClient'):
 
@@ -102,11 +141,11 @@ class DaoNodeSync(Sync):
         chain_id = self.chain_id
         gov_addr = self.gov_addr
 
-        response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/progress")
-        some_pretty_recent_block = response.json()['block']
+        progress_data = await self._fetch_progress()
+        some_pretty_recent_block = progress_data['block']
 
-        response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposals")
-        proposals = response.json()['proposals']
+        proposals_data = await self._fetch_proposals()
+        proposals = proposals_data['proposals']
 
         anything_changed = False
         skipped_count = 0
@@ -133,8 +172,8 @@ class DaoNodeSync(Sync):
 
 
             try:
-                response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposal/{proposal_info['id']}")
-                proposal = response.json()['proposal']
+                proposal_data = await self._fetch_proposal_detail(proposal_info['id'])
+                proposal = proposal_data['proposal']
             except Exception as e:
                 print("Proposal fetch failed, we can't proceed, we're blind.  We don't want to corrupt in case of the source pruning.")
                 print(e)
