@@ -38,6 +38,11 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
         refreshed = job.stats.get('total_refreshed', '-') if job.stats else '-'
         skipped = job.stats.get('total_skipped', '-') if job.stats else '-'
 
+        # Format timestamps for JavaScript conversion
+        created_at_iso = job.created_at.isoformat() if job.created_at else ''
+        started_at_iso = job.started_at.isoformat() if job.started_at else ''
+        completed_at_iso = job.completed_at.isoformat() if job.completed_at else ''
+
         job_rows += f"""
         <tr>
             <td>
@@ -50,9 +55,9 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
             <td style="color: {status_color}; font-weight: bold;">{job.status}</td>
             <td>{refreshed}</td>
             <td>{skipped}</td>
-            <td>{job.created_at.strftime('%Y-%m-%d %H:%M:%S')}</td>
-            <td>{job.started_at.strftime('%H:%M:%S') if job.started_at else '-'}</td>
-            <td>{job.completed_at.strftime('%H:%M:%S') if job.completed_at else '-'}</td>
+            <td class="timestamp" data-timestamp="{created_at_iso}">{job.created_at.strftime('%Y-%m-%d %H:%M:%S')}</td>
+            <td class="timestamp" data-timestamp="{started_at_iso}">{job.started_at.strftime('%H:%M:%S') if job.started_at else '-'}</td>
+            <td class="timestamp" data-timestamp="{completed_at_iso}">{job.completed_at.strftime('%H:%M:%S') if job.completed_at else '-'}</td>
             <td>{job.error if job.error else '-'}</td>
         </tr>
         """
@@ -202,6 +207,41 @@ def generate_dashboard_html(jobs: List, JobStatus) -> str:
                     }}
                 }});
             }}
+
+            function convertTimestampsToLocalTime() {{
+                const timestampElements = document.querySelectorAll('.timestamp');
+
+                timestampElements.forEach(element => {{
+                    const isoTimestamp = element.getAttribute('data-timestamp');
+
+                    if (isoTimestamp && isoTimestamp !== '') {{
+                        const date = new Date(isoTimestamp);
+
+                        // Check if this is a "created" timestamp (has full date) or just time
+                        const isCreatedColumn = element.cellIndex === 7; // Created column
+
+                        if (isCreatedColumn) {{
+                            // Format as YYYY-MM-DD HH:MM:SS in local timezone
+                            const year = date.getFullYear();
+                            const month = String(date.getMonth() + 1).padStart(2, '0');
+                            const day = String(date.getDate()).padStart(2, '0');
+                            const hours = String(date.getHours()).padStart(2, '0');
+                            const minutes = String(date.getMinutes()).padStart(2, '0');
+                            const seconds = String(date.getSeconds()).padStart(2, '0');
+                            element.textContent = `${{year}}-${{month}}-${{day}} ${{hours}}:${{minutes}}:${{seconds}}`;
+                        }} else {{
+                            // Format as HH:MM:SS in local timezone
+                            const hours = String(date.getHours()).padStart(2, '0');
+                            const minutes = String(date.getMinutes()).padStart(2, '0');
+                            const seconds = String(date.getSeconds()).padStart(2, '0');
+                            element.textContent = `${{hours}}:${{minutes}}:${{seconds}}`;
+                        }}
+                    }}
+                }});
+            }}
+
+            // Convert timestamps when page loads
+            document.addEventListener('DOMContentLoaded', convertTimestampsToLocalTime);
         </script>
     </head>
     <body>
