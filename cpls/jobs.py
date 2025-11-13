@@ -23,6 +23,7 @@ class JobStatus(str, Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+    SKIPPED = "skipped"
 
 class Job(BaseModel):
     id: str
@@ -67,8 +68,17 @@ class JobQueue:
             payload=payload,
             created_at=datetime.now()
         )
-        self.jobs[job_id] = job
-        await self.queue.put(job)
+
+        dao_lock = self._get_dao_lock(payload['infra_dao_slug'])
+        if dao_lock.locked():
+            job.status = JobStatus.SKIPPED
+            job.error = "Queue is full, job skipped"
+            self.jobs[job_id] = job
+        else:
+            self.jobs[job_id] = job
+            await self.queue.put(job)
+    
+
         return job_id
 
     async def _worker(self, worker_id: int, gcs_client: 'GCSClient'):
