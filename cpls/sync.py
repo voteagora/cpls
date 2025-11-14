@@ -3,7 +3,7 @@ from .gcs import GCSClient
 from .postgres import PostgreSQLClient
 from .blockcache import BlockCacheClient
 
-from .config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY, ALCHEMY_API_KEY_STAKING, DATABASE_URL, BLOCKCACHE_URL, load_tenant_config
+from .config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY, ALCHEMY_API_KEY_SYNDICATE_L3_STAKING_NON_AGORA_ACCOUNT, DATABASE_URL, BLOCKCACHE_URL, load_tenant_config
 
 import hashlib
 import json
@@ -56,7 +56,7 @@ class Sync:
         self.pg = PostgreSQLClient(DATABASE_URL)
 
         self.bc = BlockCacheClient(BLOCKCACHE_URL, ALCHEMY_API_KEY, http_client)
-        self.bc_staking = BlockCacheClient(BLOCKCACHE_URL, ALCHEMY_API_KEY_STAKING, http_client)
+        self.bc_staking = BlockCacheClient(BLOCKCACHE_URL, ALCHEMY_API_KEY_SYNDICATE_L3_STAKING_NON_AGORA_ACCOUNT, http_client)
     def calc_cache_control(self, liveness):
 
         if liveness == 'live':
@@ -291,16 +291,15 @@ class Sync:
         url = f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/staking/all-stakes/at-block/{l3_block_number}"
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url)
-                if response.status_code == 404:
-                    return {}
-                response.raise_for_status()
-                data = response.json()
-                stakes = {addr.lower(): int(amount) for addr, amount in data.get('stakes', {}).items()}
-                if stakes:
-                    print(f"Fetched {len(stakes)} staking positions at L3 block {l3_block_number} (L1 block {l1_block_number})")
-                return stakes
+            response = await self.http_client.get(url)
+            if response.status_code == 404:
+                return {}
+            response.raise_for_status()
+            data = response.json()
+            stakes = {addr.lower(): int(amount) for addr, amount in data.get('stakes', {}).items()}
+            if stakes:
+                print(f"Fetched {len(stakes)} staking positions at L3 block {l3_block_number} (L1 block {l1_block_number})")
+            return stakes
         except Exception as e:
             print(f"Could not fetch staking data: {e}")
             return {}
@@ -313,16 +312,15 @@ class Sync:
         url = f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/staking/total/at-block/{l3_block_number}"
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url)
-                if response.status_code == 404:
-                    return 0
-                response.raise_for_status()
-                data = response.json()
-                total_stake = int(data.get('total_stake', 0))
-                if total_stake > 0:
-                    print(f"Fetched total staking: {total_stake} at L3 block {l3_block_number} (L1 block {l1_block_number})")
-                return total_stake
+            response = await self.http_client.get(url)
+            if response.status_code == 404:
+                return 0
+            response.raise_for_status()
+            data = response.json()
+            total_stake = int(data.get('total_stake', 0))
+            if total_stake > 0:
+                print(f"Fetched total staking: {total_stake} at L3 block {l3_block_number} (L1 block {l1_block_number})")
+            return total_stake
         except Exception as e:
             print(f"Could not fetch total staking data: {e}")
             return 0
