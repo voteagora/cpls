@@ -162,7 +162,6 @@ class DaoNodeSync(Sync):
             proposal['hybrid'] = hybrid
             
             if hybrid:
-                print("found a hybrid proposal!")
                 govless_proposal_blob_name = self.govless_proposal_blob_name(mapping[proposal_id])
                 proposal['govless_proposal'] = await gcs_client.read_dict(govless_proposal_blob_name)
 

@@ -2,7 +2,7 @@ import time, json
 
 from collections import defaultdict
 
-import httpx
+import copy
 
 from .gcs import GCSClient
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS
@@ -122,6 +122,8 @@ class EASAtlasSync(Sync):
 
                 else:
 
+                    vote_data = []
+
                     if proposal_type in ('OPTIMISTIC', 'STANDARD', 'OPTIMISTIC_TIERED'):
 
                         outcome = defaultdict(lambda: defaultdict(int))
@@ -130,6 +132,8 @@ class EASAtlasSync(Sync):
                             support = int(vote['support'])
                             outcome[vote['citizen_type']][support] += int(vote['weight'])
 
+                            vote_data.append(vote)
+
                     elif proposal_type == 'APPROVAL': 
 
                         outcome = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
@@ -137,13 +141,24 @@ class EASAtlasSync(Sync):
                         for vote in votes:
                             support = vote['support']
                             options =json.loads(support)
+                            weight = int(vote['weight'])
                             for option in options:
-                                outcome[vote['citizen_type']][option][1] += int(vote['weight'])
+                                outcome[vote['citizen_type']][option][1] += weight
+                            
+                            # The view atlas.VotesWithMeta conflates support with params for approval votes.
+                            # The root cause of the pain, is the overloading of the attestation type.
+                            # This is an example of a vote: https://optimism.easscan.org/attestation/view/0x03117001e48edd27568c56bdc59e49904ab9f163ce7f28e1930e2a95ceee32d8
+
+                            vote_copy = copy.deepcopy(vote)
+                            vote_copy['params'] = options
+                            vote_copy['support'] = weight
+
+                            vote_data.append(vote_copy)
                     
                     else:
                         raise Exception("Unknown EAS-Atlas proposal type %s for proposal id %s" % (proposal_type, proposal_id))
 
-                    await self.overwrite_votes(votes, proposal_id, gcs_client)
+                    await self.overwrite_votes(vote_data, proposal_id, gcs_client)
 
                 proposal['outcome'] = outcome
             
