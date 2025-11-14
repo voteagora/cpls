@@ -46,21 +46,16 @@ class SnapshotGraphQLClient:
         self.client = http_client if http_client is not None else httpx.AsyncClient()
 
     @snapshot_retry
-    async def get_votes(self, on_or_after) -> List:
+    async def get_votes(self, proposal_id, page) -> List:
 
+        skip = page * self.page_size
         QUERY = """
                 {
-                items: votes(where: {space : "%s", created_gte : %s}, orderBy: "created", orderDirection: asc, first: %s) {
+                items: votes(where: {space : "%s", proposal : "%s"}, orderBy: "created", orderDirection: asc, skip: %s, first: %s) {
                     id
-                    ipfs
                     voter
                     created
-                    proposal {
-                      id
-                      choices
-                    }
                     choice
-                    metadata
                     reason
                     app
                     vp
@@ -68,12 +63,29 @@ class SnapshotGraphQLClient:
                     vp_state
                 }
                 }
-                """ % (self.space, on_or_after, self.page_size)
+                """ % (self.space, proposal_id, skip, self.page_size)
 
         resp = await self.client.post(self.url, json={'query': QUERY})
         payload = resp.json()['data']['items']
 
         return payload
+    
+    async def get_all_votes(self, proposal_id) -> List:
+
+        votes = []
+        page = 0
+        while page <= 5: # For some reason it errors after 5.
+            page_votes = await self.get_votes(proposal_id, page)
+
+            if page_votes is None:
+                break
+        
+            votes.extend(page_votes)
+    
+            if len(page_votes) < self.page_size:
+                break
+            page += 1
+        return votes
 
     @snapshot_retry
     async def get_proposals(self) -> List:
@@ -123,6 +135,10 @@ class SnapshotSync(Sync):
 
         super().__init__(infra_dao_slug, config, reset, http_client)
 
+        self.index_tenant_prefix = self.config['index_tenant_prefix']
+        self.token_addr = self.config['deployment']['token']['address']
+        self.dao_slug = self.config['dao_slug']
+
         self.sc = SnapshotGraphQLClient(self.infra_dao_slug, http_client)
 
     def govless_proposal_blob_name(self, proposal_id):
@@ -142,7 +158,6 @@ class SnapshotSync(Sync):
 
         for i, proposal in enumerate(proposals):
         
-            print(f"Proposal {i+1} of {len(proposals)}")
             proposal_id = proposal['id']
 
             try:
@@ -181,6 +196,44 @@ class SnapshotSync(Sync):
 
             anything_changed = True
             refreshed_count += 1
+
+            if reuse_tally:
+                pass
+            elif proposal['type'] == 'copeland':
+
+                vp_snapshot = await self.get_vp_snapshot_all_delegates(block_number=proposal['snapshot'], 
+                                                                 gcs_client=gcs_client, 
+                                                                 reset=self.reset)
+                
+                vp_snapshot = {s['addr'].lower(): s['vp'] for s in vp_snapshot}
+
+                votes = await self.sc.get_all_votes(proposal_id)
+
+                if self.delegate_metadata is None:
+                    self.delegate_metadata = await self.get_delegate_metadata()
+                
+                votes_out = []
+                for vote in votes:
+                    addr = vote['voter'].lower()
+                    delegate_meta = self.delegate_metadata.get(addr, {})
+                    vote.update(delegate_meta)
+
+                    del vp_snapshot[addr]
+
+                    votes_out.append(vote)
+
+                await self.overwrite_votes(votes, proposal_id, gcs_client)
+
+                hasnt_voted = []
+                for non_voter, vp in vp_snapshot.items():
+                    row = {'addr' : non_voter,
+                           'vp': vp}
+                    delegate_meta = self.delegate_metadata.get(non_voter, {})
+                    row.update(delegate_meta)
+                    hasnt_voted.append(row)
+
+                await self.overwrite_hasnt_voted(hasnt_voted, proposal_id, gcs_client)
+
 
             # This section here, enriches the proposal object, in a way that will only update,
             # if the hash for the proposal's state changes. Downstream consumers can either use it, accepting

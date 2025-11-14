@@ -265,7 +265,7 @@ class Sync:
                         ORDER BY delegate, block_number desc)
             
             select * from qry where vp::numeric > 0;"""
-         
+
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
             rows = await connection.fetch(qry)
@@ -324,15 +324,16 @@ if __name__ == "__main__":
     from .sync_daonode import DaoNodeSync
     from .sync_eas_atlas import EASAtlasSync
     from .sync_eas_oodao import EASOoDaoSync
+    from .sync_snapshot import SnapshotSync
 
     # dns = EASOoDaoSync('jeffdao', reset=True)
     # dns = EASAtlasSync('optimism', reset=True)
 
-    config = load_tenant_config('uniswap')
+    config = load_tenant_config('ens')
 
     http_client = create_http_client()
 
-    dns = DaoNodeSync('uniswap', config, reset=True, http_client=http_client)
+    dns = SnapshotSync('ens', config, reset=True, http_client=http_client)
 
     gcs_client = GCSClient(GCS_BUCKET_NAME)
 
