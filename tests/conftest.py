@@ -85,5 +85,41 @@ class FakeBlockCacheClient:
     def clear_lru(self):
         return None
 
+class _AsyncConnCtx:
+    def __init__(self, conn):
+        self.conn = conn
+    async def __aenter__(self):
+        return self.conn
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+class FakeConnection:
+    def __init__(self, fetch_map=None, fetchrow_map=None):
+        self.fetch_map = fetch_map or {}
+        self.fetchrow_map = fetchrow_map or {}
+    async def fetch(self, qry):
+        rows = self.fetch_map.get(qry, [])
+        return rows
+    async def fetchrow(self, qry):
+        return self.fetchrow_map.get(qry, None)
+
+class FakePool:
+    def __init__(self, conn):
+        self._conn = conn
+    async def acquire(self):
+        return _AsyncConnCtx(self._conn)
+
+class FakePostgresClient:
+    def __init__(self):
+        self._fetch_map = {}
+        self._fetchrow_map = {}
+    def register_fetch(self, qry, rows):
+        self._fetch_map[qry] = rows
+    def register_fetchrow(self, qry, row):
+        self._fetchrow_map[qry] = row
+    async def connect(self):
+        conn = FakeConnection(self._fetch_map, self._fetchrow_map)
+        return FakePool(conn)
+
 def pytest_configure(config):
     return None
