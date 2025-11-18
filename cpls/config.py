@@ -24,6 +24,8 @@ DEPLOYMENT = os.getenv("DEPLOYMENT", "main")
 INFRA_DAO_SLUGS = os.getenv("INFRA_DAO_SLUGS", "ens,optimism,cyber,pguild,syndicate")
 INFRA_DAO_SLUGS = INFRA_DAO_SLUGS.split(',')
 RESET_PROPOSALS_ON_RESTART = os.getenv("RESET_PROPOSALS_ON_RESTART", "true").lower() == "true"
+PROPOSAL_CHECK_API_URL = os.getenv("PROPOSAL_CHECK_API_URL", "")
+PROPOSAL_CHECK_SECRET = os.getenv("PROPOSAL_CHECK_SECRET", "")
 
 # Print all environment variables
 print("=" * 60)
