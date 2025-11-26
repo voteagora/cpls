@@ -55,12 +55,12 @@ class DaoNodeSync(Sync):
         return self.bc.get_estimated_blocktime(self.chain_id, block_number)
     
     async def read_snapshot_votable_supply(self, block_number: int):
-        
         if self.infra_dao_slug == 'optimism':
-            return -2 # await self.bc.votable_supply_at_block_with_oracle(self.chain_id, self.gov_addr, block_number)
+            votable_supply = await self.bc.votable_supply_at_block_with_oracle(self.chain_id, self.gov_addr, block_number)     
         else:
-            return -1
-    
+            votable_supply = await self.bc.votable_supply_at_block(self.chain_id, self.gov_addr, block_number)     
+        return votable_supply
+            
     async def read_govless_proposal_mappings(self):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
