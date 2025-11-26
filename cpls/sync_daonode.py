@@ -54,14 +54,33 @@ class DaoNodeSync(Sync):
 
         return self.bc.get_estimated_blocktime(self.chain_id, block_number)
     
+    async def read_snapshot_votable_supply_from_db(self, block_number: int):
+
+        qry = f"""SELECT 
+                    sum(new_votes::numeric - previous_votes::numeric)::text AS votable_supply
+                  FROM auazure.{self.index_tenant_prefix}_token_delegate_votes_changed
+                  WHERE address = '{self.token_addr.lower()}' and block_number <= {block_number}"""
+        
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(qry)
+            vp = int(row['votable_supply'])
+            return vp
+    
     async def read_snapshot_votable_supply(self, block_number: int):
+
         if self.infra_dao_slug == 'optimism':
-            votable_supply = await self.bc.votable_supply_at_block_with_oracle(self.chain_id, self.gov_addr, block_number)     
+            votable_supply = await self.bc.votable_supply_at_block_with_oracle(self.chain_id, self.gov_addr, block_number)    
+        elif self.infra_dao_slug == 'uniswap':
+            votable_supply = 40000000000000000000000000
+        elif self.infra_dao_slug in ('scroll', 'cyber'):
+            # TODO - figure out if this is actually consumed.  It might not be, but should be.  Or it might not be, and doesn't matter because of their special governor.
+            votable_supply = await self.read_snapshot_votable_supply_from_db(block_number)
         else:
             votable_supply = await self.bc.votable_supply_at_block(self.chain_id, self.gov_addr, block_number)   
 
         assert votable_supply > 0, "Positive votable supply expected, found something non-positive."
-        
+
         return votable_supply
             
     async def read_govless_proposal_mappings(self):
