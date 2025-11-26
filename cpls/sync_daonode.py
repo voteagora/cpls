@@ -58,7 +58,10 @@ class DaoNodeSync(Sync):
         if self.infra_dao_slug == 'optimism':
             votable_supply = await self.bc.votable_supply_at_block_with_oracle(self.chain_id, self.gov_addr, block_number)     
         else:
-            votable_supply = await self.bc.votable_supply_at_block(self.chain_id, self.gov_addr, block_number)     
+            votable_supply = await self.bc.votable_supply_at_block(self.chain_id, self.gov_addr, block_number)   
+
+        assert votable_supply > 0, "Positive votable supply expected, found something non-positive."
+        
         return votable_supply
             
     async def read_govless_proposal_mappings(self):
