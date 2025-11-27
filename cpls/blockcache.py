@@ -159,8 +159,11 @@ class BlockCacheClient:
 
         return result
     
-    async def votable_supply_at_block_with_oracle(self, chain_id, contract_address, block_number):
-        result = await self.contract_call_encoded(chain_id, contract_address, block_number + 1, 'votableSupply(uint256)', [block_number])
+    async def votable_supply_at_block_with_oracle(self, contract_address, block_number):
+
+        BLOCK_ON_JAN_18_2024 = 114968612
+        as_of_block_number = max([BLOCK_ON_JAN_18_2024, block_number])
+        result = await self.contract_call_encoded(10, contract_address, as_of_block_number, 'votableSupply(uint256)', [block_number])
         vs = int(result['result'], 16)
         return vs
 

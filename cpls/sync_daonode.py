@@ -56,8 +56,13 @@ class DaoNodeSync(Sync):
     
     async def read_snapshot_votable_supply_from_db(self, block_number: int):
 
+        if self.infra_dao_slug == 'optimism':
+            new_votes, previous_votes = 'new_balance', 'previous_balance'
+        else:
+            new_votes, previous_votes = 'new_votes', 'previous_votes'
+
         qry = f"""SELECT 
-                    sum(new_votes::numeric - previous_votes::numeric)::text AS votable_supply
+                    sum({new_votes}::numeric - {previous_votes}::numeric)::text AS votable_supply
                   FROM auazure.{self.index_tenant_prefix}_token_delegate_votes_changed
                   WHERE address = '{self.token_addr.lower()}' and block_number <= {block_number}"""
         
@@ -70,7 +75,18 @@ class DaoNodeSync(Sync):
     async def read_snapshot_votable_supply(self, block_number: int):
 
         if self.infra_dao_slug == 'optimism':
-            votable_supply = await self.bc.votable_supply_at_block_with_oracle(self.chain_id, self.gov_addr, block_number)    
+
+            # Optimism had a gov upgrade sometime between Jan 8 and Jan 18, 2018.  Jeff can't find the transaction, gave up.
+            # What we do here, is trust the oracle when we can, because it's much faster and more accurate.
+
+            # And then, when we can't, we fall back on the IVotes, but the query is painfully slow and getting worse with time.
+            # Hopefully, we can actually switch to not resetting the archives on boot, once things are stable.
+
+            votable_supply = await self.bc.votable_supply_at_block_with_oracle(self.gov_addr, block_number)    
+            
+            if votable_supply == 0:
+                votable_supply = await self.read_snapshot_votable_supply_from_db(block_number)
+
         elif self.infra_dao_slug == 'uniswap':
             votable_supply = 40000000000000000000000000
         elif self.infra_dao_slug in ('scroll', 'cyber'):
