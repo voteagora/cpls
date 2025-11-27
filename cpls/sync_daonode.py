@@ -143,6 +143,8 @@ class DaoNodeSync(Sync):
         
             proposal_id = proposal_info['id']
 
+            print(self.infra_dao_slug, i, proposal_id)
+
 
             ENS_CENSORED_PROPOSALS = ['6325634497264265012626716784077918930541180346289202027480596910133312093648']
 
