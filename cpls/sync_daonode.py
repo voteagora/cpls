@@ -324,6 +324,29 @@ class DaoNodeSync(Sync):
             end_block = proposal['end_block']
             proposal['end_blocktime'] = await self.get_timestamp(chain_id, end_block)
 
+            # Quorum calculation (Optimism only for now)
+            if self.infra_dao_slug == 'optimism':
+                OPTIMISM_V6_UPGRADE_BLOCK = 114968612  # Block around Jan 18, 2024, the V6 upgrade, could also maybe use 114995000?
+                if start_block < OPTIMISM_V6_UPGRADE_BLOCK:
+                    proposal['quorum'] = '0'
+                else:
+                    # Get quorum from contract
+                    quorum_result = await self.bc.contract_call_encoded(
+                        chain_id, self.gov_addr, start_block,
+                        'quorum(uint256)', [int(proposal['id'])]
+                    )
+                    quorum = int(quorum_result['result'], 16)
+
+                    if not quorum:
+                        # Calculate based on 30% of votable supply
+                        votable_supply = await self.read_snapshot_votable_supply(start_block)
+                        quorum = (votable_supply * 30) // 100
+
+                    proposal['quorum'] = str(quorum)
+            else:
+                proposal['quorum'] = '0'
+
+            print("Quorum set to {}".format(proposal['quorum']))
 
             curtime = int(time.time())
 
