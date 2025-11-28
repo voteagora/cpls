@@ -130,6 +130,8 @@ class Sync:
         
         proposal_list.sort(key=lambda x: int(x['end_blocktime']), reverse=True)
 
+        print("Uploading the full list with {} proposals".format(len(proposal_list)))
+
         await gcs_client.upload_ndjson(proposal_list, f"data/{self.infra_dao_slug}/proposal_list.full.ndjson.gz")
 
     def vp_snapshot_blob_name(self, snapshot_reference):
