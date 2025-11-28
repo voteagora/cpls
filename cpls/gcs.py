@@ -167,11 +167,13 @@ class GCSClient:
             # Download compressed blob
             blob_data = self.bucket.blob(blob_name)
 
+            blob_data.reload()  # Metadata API call - gets latest generation
+            
             if must_uncompress:
-                compressed_data = blob_data.download_as_bytes()
+                compressed_data = blob_data.download_as_bytes(generation=blob_data.generation)
                 json_data = gzip.decompress(compressed_data).decode()
             else:
-                json_data = blob_data.download_as_string()
+                json_data = blob_data.download_as_string(generation=blob_data.generation)
 
             data = json.loads(json_data)
 
@@ -267,14 +269,16 @@ class GCSClient:
             # Download compressed blob
             blob_data = self.bucket.blob(blob_name)
 
+            blob_data.reload()  # Metadata API call - gets latest generation
+
             # Ensure blob name ends with .json
             must_uncompress = blob_name.endswith('.gz')
 
             if must_uncompress:
-                compressed_data = blob_data.download_as_bytes()
+                compressed_data = blob_data.download_as_bytes(generation=blob_data.generation)
                 ndjson_data = gzip.decompress(compressed_data).decode()
             else:
-                ndjson_data = blob_data.download_as_string()
+                ndjson_data = blob_data.download_as_string(generation=blob_data.generation)
 
             # Parse each line as JSON
             data = []
