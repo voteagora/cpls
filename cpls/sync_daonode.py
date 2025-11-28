@@ -156,9 +156,6 @@ class DaoNodeSync(Sync):
         refreshed_count = 0
 
         for i, proposal_info in enumerate(proposals):
-
-            if i > 5:
-                break
         
             proposal_id = proposal_info['id']
 
