@@ -72,7 +72,7 @@ class DaoNodeSync(Sync):
             vp = int(row['votable_supply'])
             return vp
     
-    async def read_snapshot_votable_supply(self, block_number: int):
+    async def read_snapshot_votable_supply(self, block_number: int) -> int:
 
         if self.infra_dao_slug == 'optimism':
 
@@ -87,9 +87,7 @@ class DaoNodeSync(Sync):
             if votable_supply == 0:
                 votable_supply = await self.read_snapshot_votable_supply_from_db(block_number)
 
-        elif self.infra_dao_slug == 'uniswap':
-            votable_supply = 40000000000000000000000000
-        elif self.infra_dao_slug in ('scroll', 'cyber'):
+        elif self.infra_dao_slug in ('scroll', 'cyber', 'uniswap'):
             # TODO - figure out if this is actually consumed.  It might not be, but should be.  Or it might not be, and doesn't matter because of their special governor.
             votable_supply = await self.read_snapshot_votable_supply_from_db(block_number)
         else:
@@ -131,6 +129,70 @@ class DaoNodeSync(Sync):
         """Fetch single proposal detail from DaoNode API with retry"""
         response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposal/{proposal_id}")
         return response.json()
+
+    @daonode_retry
+    async def _fetch_proposal_type(self, type_id): # TODO MEMOIZ THIS!!!!!!!!!!
+        """Fetch single proposal detail from DaoNode API with retry"""
+        response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposal_types")
+        return response.json()['proposal_types'][str(type_id)]
+
+    async def read_quorum(self, proposal) -> str:
+        start_block, proposal_id = proposal['start_block'], proposal['id']
+
+        if self.infra_dao_slug == 'optimism':
+            OPTIMISM_V6_UPGRADE_BLOCK = 114968612  # Block around Jan 18, 2024, the V6 upgrade, could also maybe use 114995000?
+            if start_block < OPTIMISM_V6_UPGRADE_BLOCK:
+                return '0' 
+            else:
+                # Get quorum from contract
+                quorum_result = await self.bc.contract_call_encoded(
+                    10, self.gov_addr, start_block,
+                    'quorum(uint256)', [int(proposal_id)]
+                )
+                quorum = int(quorum_result['result'], 16)
+
+                if not quorum:
+                    # Calculate based on 30% of votable supply
+                    votable_supply = await self.read_snapshot_votable_supply(start_block)
+                    quorum = (votable_supply * 30) // 100
+
+                return str(quorum)
+
+        elif self.infra_dao_slug == 'uniswap':
+            return '40000000000000000000000000'
+        elif self.infra_dao_slug == 'ens':
+            quorum_result = await self.bc.contract_call_encoded(
+                1, self.gov_addr, start_block + 1,
+                'quorum(uint256)', [start_block]
+            )
+            quorum = int(quorum_result['result'], 16)
+            return str(quorum)
+        elif self.infra_dao_slug == 'cyber':
+            votable_supply = await self.read_snapshot_votable_supply(start_block)
+            quorum = int(votable_supply * 30 / 100) # 30% of votable supply
+            return str(votable_supply)
+        elif self.infra_dao_slug == 'scroll':
+
+            # The multiply by 100000 then divide by 1000000000 is for the humans to reason about this.
+            # The 100000 is a scaler associated with the proposal type.
+            # The 
+            quorum_pct = proposal['proposal_type_info']['quorum'] * 100000
+
+            token_supply = await self.bc.contract_call_encoded(
+                534352, self.token_addr, start_block,
+                'totalSupply()', ''
+            )
+            token_supply = int(token_supply['result'], 16)
+
+            return str(int(token_supply * quorum_pct / 1000000000))
+        else:
+            quorum_result = await self.bc.contract_call_encoded(
+                self.chain_id, self.gov_addr, start_block,
+                'quorum(uint256)', [proposal_id]
+            )
+            quorum = int(quorum_result['result'], 16)
+            return str(quorum)
+
 
     async def refresh_list(self, gcs_client: 'GCSClient'):
 
@@ -190,7 +252,13 @@ class DaoNodeSync(Sync):
 
             try:
                 proposal_data = await self._fetch_proposal_detail(proposal_info['id'])
+
                 proposal = proposal_data['proposal']
+
+                if 'proposal_type' in proposal:
+                    proposal_type_info = await self._fetch_proposal_type(proposal['proposal_type'])
+                    proposal['proposal_type_info'] = proposal_type_info
+
             except Exception as e:
                 print("Proposal fetch failed, we can't proceed, we're blind.  We don't want to corrupt in case of the source pruning.")
                 print(e)
@@ -223,6 +291,8 @@ class DaoNodeSync(Sync):
                 skipped_count += 1
                 continue
 
+
+            
             # We can do this after for DAO-node, rather than before the cache check in EAS, because DAO-node can count the votes for us.
             # We get it from the DB, rather than DAO-node, because the DB has txn hashes.
 
@@ -321,30 +391,18 @@ class DaoNodeSync(Sync):
             # if the hash for the proposal's state changes. Downstream consumers can either use it, accepting
             # the caveate, or re-calculate it.
 
+
+            # It's slightly aggressive to attempt this before the "curtime > start_blocktime" check below.
+            # It's also slower for cyber, because we calculate votable supply twice.
+            # It'll error for props that haven't started yet for DAOs that require quorum as of a specific block number AND who have a voting delay.
+            # But, the front-end will get confused, if the prop has started, but archive 
+            # service hasn't completed its first loop yet.
+            # So, this is a bit of a tradeoff, and less precise, but easier -- for most DAOs.
+            # I think it breaks for ENS, but that's it(?)
+            proposal['quorum'] = await self.read_quorum(proposal)
+
             end_block = proposal['end_block']
             proposal['end_blocktime'] = await self.get_timestamp(chain_id, end_block)
-
-            # Quorum calculation (Optimism only for now)
-            if self.infra_dao_slug == 'optimism':
-                OPTIMISM_V6_UPGRADE_BLOCK = 114968612  # Block around Jan 18, 2024, the V6 upgrade, could also maybe use 114995000?
-                if start_block < OPTIMISM_V6_UPGRADE_BLOCK:
-                    proposal['quorum'] = '0'
-                else:
-                    # Get quorum from contract
-                    quorum_result = await self.bc.contract_call_encoded(
-                        chain_id, self.gov_addr, start_block,
-                        'quorum(uint256)', [int(proposal['id'])]
-                    )
-                    quorum = int(quorum_result['result'], 16)
-
-                    if not quorum:
-                        # Calculate based on 30% of votable supply
-                        votable_supply = await self.read_snapshot_votable_supply(start_block)
-                        quorum = (votable_supply * 30) // 100
-
-                    proposal['quorum'] = str(quorum)
-            else:
-                proposal['quorum'] = '0'
 
             print("Quorum set to {}".format(proposal['quorum']))
 
@@ -352,7 +410,6 @@ class DaoNodeSync(Sync):
 
             if curtime > start_blocktime:
                 proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block))
-
 
                 if self.delegate_metadata is None:
                     self.delegate_metadata = await self.get_delegate_metadata()
