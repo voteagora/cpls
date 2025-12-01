@@ -56,7 +56,7 @@ class DaoNodeSync(Sync):
     
     async def read_snapshot_votable_supply_from_db(self, block_number: int):
 
-        if self.infra_dao_slug == 'optimism':
+        if self.infra_dao_slug in ('optimism', 'uniswap'):
             new_votes, previous_votes = 'new_balance', 'previous_balance'
         else:
             new_votes, previous_votes = 'new_votes', 'previous_votes'
