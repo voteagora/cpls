@@ -87,7 +87,7 @@ class DaoNodeSync(Sync):
             if votable_supply == 0:
                 votable_supply = await self.read_snapshot_votable_supply_from_db(block_number)
 
-        elif self.infra_dao_slug in ('scroll', 'cyber', 'uniswap'):
+        elif self.infra_dao_slug in ('scroll', 'cyber', 'uniswap', 'ens'):
             # TODO - figure out if this is actually consumed.  It might not be, but should be.  Or it might not be, and doesn't matter because of their special governor.
             votable_supply = await self.read_snapshot_votable_supply_from_db(block_number)
         else:
