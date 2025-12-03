@@ -396,13 +396,6 @@ class EASOoDaoSync(Sync):
 
             proposal['outcome'] = outcome
 
-            try:
-                proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
-            except SkipProposal as e:
-                print(e)
-                skipped_count += 1
-                continue
-
             startts = int(proposal_meta['startts'])
             endts = int(proposal_meta['endts'])
 
@@ -435,7 +428,7 @@ class EASOoDaoSync(Sync):
 
                             addr = row['addr'].lower()
                             record = copy.deepcopy(row)
-                            
+
                             try:
                                 ens = await self.bc.get_ens_lru(addr)
                                 if ens is not None:
@@ -446,12 +439,12 @@ class EASOoDaoSync(Sync):
                             delegate_metadata = self.delegate_metadata.get(addr, {})
 
                             record.update(delegate_metadata)
-                            
-                            snapshot_vp_out.append(record)                        
+
+                            snapshot_vp_out.append(record)
 
 
                     await self.overwrite_hasnt_voted(snapshot_vp_out, proposal_id, gcs_client)
-            
+
             if 'delete_event' in proposal:
                 proposal['lifecycle_stage'] = 'CANCELLED'
             elif curts < startts:
@@ -469,7 +462,7 @@ class EASOoDaoSync(Sync):
 
                     passing_quorum = (proposal['proposal_type']['quorum'] / 10000) * int(proposal['total_voting_power_at_start'])
                     passing_approval_threshold = (proposal['proposal_type']['approval_threshold'] / 10000) * int(proposal['total_voting_power_at_start'])
-                    
+
                     quorum_check = sum([int(weight) for weight in proposal['outcome']['token-holders'].values()]) >= passing_quorum
                     approval_check = int(proposal['outcome']['token-holders'].get('1', 0)) >= passing_approval_threshold
 
@@ -478,9 +471,16 @@ class EASOoDaoSync(Sync):
 
                     if quorum_check and approval_check:
                         proposal['lifecycle_stage'] = 'PASSED'
-                        
+
                     else:
                         proposal['lifecycle_stage'] = 'DEFEATED'
+
+            try:
+                proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
+            except SkipProposal as e:
+                print(e)
+                skipped_count += 1
+                continue
 
 
             proposal['start_blocktime'] = startts
