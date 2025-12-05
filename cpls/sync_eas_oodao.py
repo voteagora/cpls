@@ -85,11 +85,11 @@ class EASOoDaoSync(Sync):
             vp = int(row['votable_supply'])
             print(vp)
 
-        total_staking = await self.get_total_staking_at_block(block_number, chain_id)
-        total_votable_supply = vp + total_staking
+        total_nonivotes_vp = await self.get_total_nonivotes_vp_at_block(block_number)
+        total_votable_supply = vp + total_nonivotes_vp
         
-        if total_staking > 0:
-            print(f"Total votable supply: {vp} (DB) + {total_staking} (staking) = {total_votable_supply}")
+        if total_nonivotes_vp > 0:
+            print(f"Total votable supply: {vp} (DB) + {total_nonivotes_vp} (nonivotes) = {total_votable_supply}")
         
         return total_votable_supply
 
@@ -368,7 +368,7 @@ class EASOoDaoSync(Sync):
                         vp_entry = snapshot_vp_lookup.get(addr)
 
                         if vp_entry:
-                            # Update vote weight with actual VP (delegation + staking)
+                            # Update vote weight with actual VP (delegation + nonivotes)
                             vote['weight'] = vp_entry['vp']
                             vote_weight = int(vp_entry['vp'])
                         else:
