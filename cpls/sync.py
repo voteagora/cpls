@@ -275,7 +275,7 @@ class Sync:
             return [dict(r) for r in rows]
     
     async def get_nonivotes_vp_at_block(self, block_number):
-        url = f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/nonivotes/all/at-block/{block_number}"
+        url = f"https://{self.infra_dao_slug}.dev.agoradata.xyz/v1/nonivotes/all/at-block/{block_number}"
 
         try:
             response = await self.http_client.get(url)
@@ -292,7 +292,7 @@ class Sync:
             return {}
 
     async def get_total_nonivotes_vp_at_block(self, block_number):
-        url = f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/nonivotes/total/at-block/{block_number}"
+        url = f"https://{self.infra_dao_slug}.dev.agoradata.xyz/v1/nonivotes/total/at-block/{block_number}"
 
         try:
             response = await self.http_client.get(url)
