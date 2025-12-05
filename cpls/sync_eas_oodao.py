@@ -401,6 +401,17 @@ class EASOoDaoSync(Sync):
 
             curts = int(time.time())
 
+            # Cache-busting fields to ensure proposals in different time phases have different hashes
+            proposal['after_start'] = curts >= startts
+            proposal['after_end'] = curts >= endts
+
+            try:
+                proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
+            except SkipProposal as e:
+                print(e)
+                skipped_count += 1
+                continue
+
             if curts >= startts:
                 start_block = await self.bc.last_block_before_timestamp(proposal['chain_id'], startts)
             else:
@@ -474,13 +485,6 @@ class EASOoDaoSync(Sync):
 
                     else:
                         proposal['lifecycle_stage'] = 'DEFEATED'
-
-            try:
-                proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
-            except SkipProposal as e:
-                print(e)
-                skipped_count += 1
-                continue
 
 
             proposal['start_blocktime'] = startts
