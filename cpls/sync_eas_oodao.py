@@ -3,6 +3,7 @@ from collections import defaultdict
 
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS, to_eth_address
 from .gcs import GCSClient
+from .config import PROPOSAL_CHECK_API_URL, PROPOSAL_CHECK_SECRET
 
 OODAO = {
     11155111 : {
@@ -175,6 +176,64 @@ class EASOoDaoSync(Sync):
                                                 attestation_time as created_time
                                                 from auazure."eas_attestations_v2" ocp WHERE topic3 = '{self.oodao_shemas['CREATE_PROPOSAL']}' and topic1_cropped = '{self.oodao_dao_id}';""")
             return rows
+    
+    async def read_proposal_checks(self):
+
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(f"""select 
+                                                ref_uid as proposal_id,
+                                                data as check_uid,
+                                                attestation_time
+                                                from auazure."eas_attestations_v2" ocp 
+                                                WHERE topic3 = '{self.oodao_shemas['CHECK_PROPOSAL']}' 
+                                                AND topic1_cropped = '{self.oodao_dao_id}'
+                                                AND ref_uid IS NOT NULL;""")
+            return rows
+
+    async def mark_validation_failed(self, proposal_id: str, gcs_client: 'GCSClient'):
+        """Mark a proposal as having failed validation so it's not retried"""
+        blob_name = f"data/{self.infra_dao_slug}/proposal/{self.SOURCE}/failed_validations/{proposal_id}.json.gz"
+        await gcs_client.upload_dict({
+            "proposal_id": proposal_id,
+            "failed_at": int(time.time()),
+            "reason": "validation_failed"
+        }, blob_name)
+        print(f"Marked proposal {proposal_id} as failed validation")
+
+    async def has_validation_failed(self, proposal_id: str, gcs_client: 'GCSClient') -> bool:
+        """Check if a proposal has previously failed validation"""
+        blob_name = f"data/{self.infra_dao_slug}/proposal/{self.SOURCE}/failed_validations/{proposal_id}.json.gz"
+        try:
+            blob = await gcs_client.get_blob(blob_name)
+            return blob.exists()
+        except Exception:
+            return False
+
+    async def validate_proposal(self, proposal_id: str, attester: str, tags: list) -> bool:
+        if not PROPOSAL_CHECK_API_URL or not PROPOSAL_CHECK_SECRET:
+            return False
+
+        try:
+            response = await self.http_client.post(
+                PROPOSAL_CHECK_API_URL,
+                json={
+                    "proposalId": proposal_id,
+                    "attester": attester,
+                    "tags": tags
+                },
+                headers={
+                    "Authorization": f"Bearer {PROPOSAL_CHECK_SECRET}",
+                    "Content-Type": "application/json"
+                }
+            )
+            response.raise_for_status()
+            result = response.json()
+            return result.get("success", False)
+        except Exception as e:
+            print(f"Error validating proposal {proposal_id} with API: {e}")
+            return False
+
 
     async def read_proposal_deletions(self):
 
@@ -204,8 +263,10 @@ class EASOoDaoSync(Sync):
 
         proposals = await self.read_proposals()
         deletions = await self.read_proposal_deletions()
+        checks = await self.read_proposal_checks()
 
         deletions = {row['ref_uid'] : dict(row) for row in deletions}
+        checks = {row['proposal_id'] : dict(row) for row in checks}
 
         default_type_ranges = await self.read_proposal_type_range()
         default_type_ranges = {k : int(v) for k, v in default_type_ranges.items() if v is not None}
@@ -225,10 +286,35 @@ class EASOoDaoSync(Sync):
 
             proposal['id'] = proposal_id
 
-            authors_prop_type, approved_prop_type = await self.read_proposal_type(proposal_id)
+            try:
+                blob, existing_liveness, existing_proposal_hash, existing_num_of_votes = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
+            except SkipProposal as e:
+                print(e)
+                skipped_count += 1
+                continue
+
+            proposal_already_saved = existing_liveness != 'new'
+            has_check_attestation = proposal_id in checks
 
             proposal['tags'] = proposal['tags'].split(',')
             assert isinstance(proposal['tags'], list), "Expected tags to be a list, but got %s" % type(proposal['tags'])
+
+            # Check if this proposal has already failed validation before
+            if not has_check_attestation and not proposal_already_saved:
+                if await self.has_validation_failed(proposal_id, gcs_client):
+                    print(f"Skipping proposal {proposal_id}: previously failed validation")
+                    skipped_count += 1
+                    continue
+
+                attester = to_eth_address(proposal_meta['author'])
+                validation_passed = await self.validate_proposal(proposal_id, attester, proposal['tags'])
+                if not validation_passed:
+                    print(f"Skipping proposal {proposal_id}: validation failed")
+                    await self.mark_validation_failed(proposal_id, gcs_client)
+                    skipped_count += 1
+                    continue
+
+            authors_prop_type, approved_prop_type = await self.read_proposal_type(proposal_id)
 
             if approved_prop_type:
                 proposal['proposal_type'] = approved_prop_type
@@ -254,13 +340,6 @@ class EASOoDaoSync(Sync):
                 pass
             proposal['proposer_ens'] = None
             del proposal['author']            
-
-            try:
-                blob, existing_liveness, existing_proposal_hash, existing_num_of_votes = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
-            except SkipProposal as e:
-                print(e)
-                skipped_count += 1
-                continue
 
             votes = await self.read_votes_from_db(proposal_id)
             num_of_votes = len(votes)
@@ -326,17 +405,21 @@ class EASOoDaoSync(Sync):
 
             proposal['outcome'] = outcome
 
+            startts = int(proposal_meta['startts'])
+            endts = int(proposal_meta['endts'])
+
+            curts = int(time.time())
+
+            # Cache-busting fields to ensure proposals in different time phases have different hashes
+            proposal['after_start'] = curts >= startts
+            proposal['after_end'] = curts >= endts
+
             try:
                 proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
             except SkipProposal as e:
                 print(e)
                 skipped_count += 1
                 continue
-
-            startts = int(proposal_meta['startts'])
-            endts = int(proposal_meta['endts'])
-
-            curts = int(time.time())
 
             if curts >= startts:
                 start_block = await self.bc.last_block_before_timestamp(proposal['chain_id'], startts)
