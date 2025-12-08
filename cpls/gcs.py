@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, TYPE_CHECKING
 
-from .config import ENVIRONMENT, WRITE_TO_DISK
+from .config import WRITE_TO_DISK
 
 if TYPE_CHECKING:
     from .jobs import Job
@@ -97,7 +97,7 @@ class GCSClient:
         try:
 
             must_upload_compressed = ('.gz' in blob_name)
-            must_upload_uncompressed = blob_name.endswith('.json') or (ENVIRONMENT == "dev")
+            must_upload_uncompressed = blob_name.endswith('.json')
 
             if '.json.gz' in blob_name:
                 uncompressed_blob_name = blob_name.replace('.gz', '')
@@ -205,7 +205,7 @@ class GCSClient:
 
 
             must_upload_compressed = ('.gz' in blob_name)
-            must_upload_uncompressed = blob_name.endswith('.ndjson') or (ENVIRONMENT == "dev")
+            must_upload_uncompressed = blob_name.endswith('.ndjson')
 
             if '.ndjson.gz' in blob_name:
                 uncompressed_blob_name = blob_name.replace('.gz', '')
