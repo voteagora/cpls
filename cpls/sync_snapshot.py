@@ -244,6 +244,8 @@ class SnapshotSync(Sync):
 
             if proposal['state'] == 'closed':
                 liveness = 'archived'
+            elif proposal['state'] == 'active':
+                assert liveness == 'live', "Proposal state is active, but liveness is not live, this is a bug."
             else:
                 raise Exception("Proposal state is not closed, this is a bug.")
 
