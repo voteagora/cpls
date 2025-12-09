@@ -300,7 +300,7 @@ class Sync:
                 return 0
             response.raise_for_status()
             data = response.json()
-            total_non_ivotes = int(data.get('total_stake', 0))
+            total_non_ivotes = int(data.get('total_vp', 0))
             if total_non_ivotes > 0:
                 print(f"Fetched total nonivotes: {total_non_ivotes} at block {block_number}")
             return total_non_ivotes
