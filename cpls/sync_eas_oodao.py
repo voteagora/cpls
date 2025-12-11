@@ -191,24 +191,6 @@ class EASOoDaoSync(Sync):
                                                 AND ref_uid IS NOT NULL;""")
             return rows
 
-    async def mark_validation_failed(self, proposal_id: str, gcs_client: 'GCSClient'):
-        """Mark a proposal as having failed validation so it's not retried"""
-        blob_name = f"data/{self.infra_dao_slug}/proposal/{self.SOURCE}/failed_validations/{proposal_id}.json.gz"
-        await gcs_client.upload_dict({
-            "proposal_id": proposal_id,
-            "failed_at": int(time.time()),
-            "reason": "validation_failed"
-        }, blob_name)
-        print(f"Marked proposal {proposal_id} as failed validation")
-
-    async def has_validation_failed(self, proposal_id: str, gcs_client: 'GCSClient') -> bool:
-        """Check if a proposal has previously failed validation"""
-        blob_name = f"data/{self.infra_dao_slug}/proposal/{self.SOURCE}/failed_validations/{proposal_id}.json.gz"
-        try:
-            blob = await gcs_client.get_blob(blob_name)
-            return blob.exists()
-        except Exception:
-            return False
 
     async def validate_proposal(self, proposal_id: str, attester: str, tags: list) -> bool:
         if not PROPOSAL_CHECK_API_URL or not PROPOSAL_CHECK_SECRET:
@@ -286,6 +268,21 @@ class EASOoDaoSync(Sync):
 
             proposal['id'] = proposal_id
 
+            required_fields = ['tags', 'title', 'description']
+            missing_fields = [f for f in required_fields if not proposal.get(f)]
+            
+            if missing_fields:
+                print(f"Proposal {proposal_id}: Corrupted attestation data, missing fields: {missing_fields}")
+                proposal['tags'] = []
+                proposal['validation_failed'] = {
+                    "failed_at": int(time.time()),
+                    "reason": "corrupted_attestation_data"
+                }
+                proposal_hash = self.calculate_proposal_hash(proposal)
+                await self.overwrite_proposal(proposal, proposal_hash, 'unqualified', gcs_client)
+                skipped_count += 1
+                continue
+
             try:
                 blob, existing_liveness, existing_proposal_hash, existing_num_of_votes = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
             except SkipProposal as e:
@@ -301,16 +298,16 @@ class EASOoDaoSync(Sync):
 
             # Check if this proposal has already failed validation before
             if not has_check_attestation and not proposal_already_saved:
-                if await self.has_validation_failed(proposal_id, gcs_client):
-                    print(f"Skipping proposal {proposal_id}: previously failed validation")
-                    skipped_count += 1
-                    continue
-
                 attester = to_eth_address(proposal_meta['author'])
                 validation_passed = await self.validate_proposal(proposal_id, attester, proposal['tags'])
                 if not validation_passed:
-                    print(f"Skipping proposal {proposal_id}: validation failed")
-                    await self.mark_validation_failed(proposal_id, gcs_client)
+                    print(f"Proposal {proposal_id}: validation failed, marking as unqualified")
+                    proposal['validation_failed'] = {
+                        "failed_at": int(time.time()),
+                        "reason": "validation_failed"
+                    }
+                    proposal_hash = self.calculate_proposal_hash(proposal)
+                    await self.overwrite_proposal(proposal, proposal_hash, 'unqualified', gcs_client)
                     skipped_count += 1
                     continue
 

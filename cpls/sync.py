@@ -70,6 +70,12 @@ class Sync:
             else:
                 max_age = 2 * 60 # 2 minutes
 
+        elif liveness == 'unqualified':
+            if ENVIRONMENT == 'prod':
+                max_age = 365 * 24 * 60 * 60
+            else:
+                max_age = 2 * 60
+
         else:
             raise Exception(f"Unknown liveness: {liveness}")
 
@@ -88,6 +94,9 @@ class Sync:
             
             blob.reload() # refreshes metadata from server
             data = await gcs_client.read_dict(blob.name)
+
+            if data['data_eng_properties']['liveness'] == 'unqualified':
+                continue
 
             del data['description']
 
@@ -190,8 +199,8 @@ class Sync:
             existing_proposal_hash = 'no-hash'
             existing_num_of_votes = 0
 
-        if existing_liveness == 'archived' and not self.reset:
-            msg = f"Proposal is in archival state."
+        if existing_liveness in ('archived', 'unqualified') and not self.reset:
+            msg = f"Proposal is in {existing_liveness} state."
             raise SkipProposal(msg, proposal_id=proposal_id)
 
         return blob, existing_liveness, existing_proposal_hash, existing_num_of_votes
