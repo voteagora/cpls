@@ -171,6 +171,7 @@ class EASOoDaoSync(Sync):
                                                 decoded_attestation->>'title' as title,
                                                 decoded_attestation->'startts' as startts,
                                                 decoded_attestation->>'description' as description,
+                                                decoded_attestation->>'kwargs' as kwargs,
                                                 data as proposal_id,
                                                 block_number as created_block_number,
                                                 attestation_time as created_time
@@ -313,6 +314,8 @@ class EASOoDaoSync(Sync):
                     continue
 
             authors_prop_type, approved_prop_type = await self.read_proposal_type(proposal_id)
+            if 'kwargs' in proposal:
+                proposal['kwargs'] = json.loads(proposal['kwargs'])
 
             if approved_prop_type:
                 proposal['proposal_type'] = approved_prop_type
