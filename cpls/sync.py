@@ -8,6 +8,7 @@ from .config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, AL
 import hashlib
 import json
 import time
+import httpx
 
 FIVE_MINUTES_IN_SECONDS = 5 * 60
 
@@ -69,6 +70,12 @@ class Sync:
             else:
                 max_age = 2 * 60 # 2 minutes
 
+        elif liveness == 'unqualified':
+            if ENVIRONMENT == 'prod':
+                max_age = 365 * 24 * 60 * 60
+            else:
+                max_age = 2 * 60
+
         else:
             raise Exception(f"Unknown liveness: {liveness}")
 
@@ -87,6 +94,9 @@ class Sync:
             
             blob.reload() # refreshes metadata from server
             data = await gcs_client.read_dict(blob.name)
+
+            if data['data_eng_properties']['liveness'] == 'unqualified':
+                continue
 
             del data['description']
 
@@ -189,8 +199,8 @@ class Sync:
             existing_proposal_hash = 'no-hash'
             existing_num_of_votes = 0
 
-        if existing_liveness == 'archived' and not self.reset:
-            msg = f"Proposal is in archival state."
+        if existing_liveness in ('archived', 'unqualified') and not self.reset:
+            msg = f"Proposal is in {existing_liveness} state."
             raise SkipProposal(msg, proposal_id=proposal_id)
 
         return blob, existing_liveness, existing_proposal_hash, existing_num_of_votes
@@ -198,7 +208,7 @@ class Sync:
     async def get_timestamp(self, chain_id, block_number):
         blocktime = await self.bc.get_blocktime(chain_id, block_number)
         return blocktime
-    
+
     async def overwrite_votes(self, votes, proposal_id, gcs_client: 'GCSClient'):
 
         blob_name = self.votes_blob_name(proposal_id)
@@ -273,7 +283,41 @@ class Sync:
             rows = await connection.fetch(qry)
             return [dict(r) for r in rows]
     
-    async def get_vp_snapshot_all_delegates(self, block_number, gcs_client: 'GCSClient', reset=False):
+    async def get_nonivotes_vp_at_block(self, block_number):
+        url = f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/nonivotes/all/at-block/{block_number}"
+
+        try:
+            response = await self.http_client.get(url)
+            if response.status_code == 404:
+                return {}
+            response.raise_for_status()
+            data = response.json()
+            nonivotes_vp = {addr.lower(): int(amount) for addr, amount in data.get('vp', {}).items()}
+            if nonivotes_vp:
+                print(f"Fetched {len(nonivotes_vp)} nonivotes positions at block {block_number}")
+            return nonivotes_vp
+        except Exception as e:
+            print(f"Could not fetch nonivotes data: {e}")
+            return {}
+
+    async def get_total_nonivotes_vp_at_block(self, block_number):
+        url = f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/nonivotes/total/at-block/{block_number}"
+
+        try:
+            response = await self.http_client.get(url)
+            if response.status_code == 404:
+                return 0
+            response.raise_for_status()
+            data = response.json()
+            total_non_ivotes = int(data.get('total_vp', 0))
+            if total_non_ivotes > 0:
+                print(f"Fetched total nonivotes: {total_non_ivotes} at block {block_number}")
+            return total_non_ivotes
+        except Exception as e:
+            print(f"Could not fetch total nonivotes data: {e}")
+            return 0
+
+    async def get_vp_snapshot_all_delegates(self, block_number, gcs_client: 'GCSClient', chain_id=None, reset=False):
 
         blob_name = self.vp_snapshot_blob_name(block_number)
 
@@ -285,7 +329,44 @@ class Sync:
             except:
                 pass
 
-        data = await self.get_vp_snapshot_all_delegates_from_db(block_number)
+        # Get delegation VP from database
+        delegation_data = await self.get_vp_snapshot_all_delegates_from_db(block_number)
+
+        # Get nonivotes VP from API (only if chain_id is provided)
+        if chain_id is not None:
+            nonivotes_vp = await self.get_nonivotes_vp_at_block(block_number)
+        else:
+            nonivotes_vp = {}
+
+        # Merge both sources
+        vp_dict = {}
+
+        # Add delegation VP
+        for entry in delegation_data:
+            addr = entry['addr'].lower()
+            vp_dict[addr] = {
+                'addr': addr,
+                'vp': str(entry['vp'])
+            }
+
+        # Add/merge nonivotes VP
+        for addr, nonivotes_amount in nonivotes_vp.items():
+            if addr in vp_dict:
+                # Has both delegation and nonivotes
+                delegated = int(vp_dict[addr]['vp'])
+                total = delegated + nonivotes_amount
+                vp_dict[addr]['vp'] = str(total)
+            else:
+                # Only nonivotes (no delegations to them)
+                vp_dict[addr] = {
+                    'addr': addr,
+                    'vp': str(nonivotes_amount)
+                }
+
+        data = list(vp_dict.values())
+
+        if nonivotes_vp:
+            print(f"Merged VP: {len(data)} delegates (including {len(nonivotes_vp)} with nonivotes)")
 
         await gcs_client.upload_ndjson(data, blob_name)
 

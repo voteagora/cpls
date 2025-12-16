@@ -3,6 +3,7 @@ from collections import defaultdict
 
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS, to_eth_address
 from .gcs import GCSClient
+from .config import PROPOSAL_CHECK_API_URL, PROPOSAL_CHECK_SECRET
 
 OODAO = {
     11155111 : {
@@ -75,7 +76,7 @@ class EASOoDaoSync(Sync):
             row = await connection.fetchrow(f"""select min(quorum::numeric)::text min_quorum_pct, max(quorum::numeric)::text max_quorum_pct, min(approval_threshold::numeric)::text min_approval_threshold_pct, max(approval_threshold::numeric)::text max_approval_threshold_pct from {self.infra_dao_slug}.proposal_types where contract = '{self.oodao_dao_id}';""")
             return row
         
-    async def read_snapshot_votable_supply(self, block_number):
+    async def read_snapshot_votable_supply(self, block_number, chain_id):
 
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
@@ -83,7 +84,15 @@ class EASOoDaoSync(Sync):
             # This only works if the token has a different address on different chains.
             row = await connection.fetchrow(qry)
             vp = int(row['votable_supply'])
-            return vp
+            print(vp)
+
+        total_nonivotes_vp = await self.get_total_nonivotes_vp_at_block(block_number)
+        total_votable_supply = vp + total_nonivotes_vp
+        
+        if total_nonivotes_vp > 0:
+            print(f"Total votable supply: {vp} (DB) + {total_nonivotes_vp} (nonivotes) = {total_votable_supply}")
+        
+        return total_votable_supply
 
 
     async def read_proposal_type(self, proposal_id):
@@ -167,6 +176,46 @@ class EASOoDaoSync(Sync):
                                                 attestation_time as created_time
                                                 from auazure."eas_attestations_v2" ocp WHERE topic3 = '{self.oodao_shemas['CREATE_PROPOSAL']}' and topic1_cropped = '{self.oodao_dao_id}';""")
             return rows
+    
+    async def read_proposal_checks(self):
+
+        pool = await self.pg.connect()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(f"""select 
+                                                ref_uid as proposal_id,
+                                                data as check_uid,
+                                                attestation_time
+                                                from auazure."eas_attestations_v2" ocp 
+                                                WHERE topic3 = '{self.oodao_shemas['CHECK_PROPOSAL']}' 
+                                                AND topic1_cropped = '{self.oodao_dao_id}'
+                                                AND ref_uid IS NOT NULL;""")
+            return rows
+
+
+    async def validate_proposal(self, proposal_id: str, attester: str, tags: list) -> bool:
+        if not PROPOSAL_CHECK_API_URL or not PROPOSAL_CHECK_SECRET:
+            return False
+
+        try:
+            response = await self.http_client.post(
+                PROPOSAL_CHECK_API_URL,
+                json={
+                    "proposalId": proposal_id,
+                    "attester": attester,
+                    "tags": tags
+                },
+                headers={
+                    "Authorization": f"Bearer {PROPOSAL_CHECK_SECRET}",
+                    "Content-Type": "application/json"
+                }
+            )
+            response.raise_for_status()
+            result = response.json()
+            return result.get("success", False)
+        except Exception as e:
+            print(f"Error validating proposal {proposal_id} with API: {e}")
+            return False
+
 
     async def read_proposal_deletions(self):
 
@@ -196,8 +245,10 @@ class EASOoDaoSync(Sync):
 
         proposals = await self.read_proposals()
         deletions = await self.read_proposal_deletions()
+        checks = await self.read_proposal_checks()
 
         deletions = {row['ref_uid'] : dict(row) for row in deletions}
+        checks = {row['proposal_id'] : dict(row) for row in checks}
 
         default_type_ranges = await self.read_proposal_type_range()
         default_type_ranges = {k : int(v) for k, v in default_type_ranges.items() if v is not None}
@@ -217,10 +268,50 @@ class EASOoDaoSync(Sync):
 
             proposal['id'] = proposal_id
 
-            authors_prop_type, approved_prop_type = await self.read_proposal_type(proposal_id)
+            required_fields = ['tags', 'title', 'description']
+            missing_fields = [f for f in required_fields if not proposal.get(f)]
+            
+            if missing_fields:
+                print(f"Proposal {proposal_id}: Corrupted attestation data, missing fields: {missing_fields}")
+                proposal['tags'] = []
+                proposal['validation_failed'] = {
+                    "failed_at": int(time.time()),
+                    "reason": "corrupted_attestation_data"
+                }
+                proposal_hash = self.calculate_proposal_hash(proposal)
+                await self.overwrite_proposal(proposal, proposal_hash, 'unqualified', gcs_client)
+                skipped_count += 1
+                continue
+
+            try:
+                blob, existing_liveness, existing_proposal_hash, existing_num_of_votes = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
+            except SkipProposal as e:
+                print(e)
+                skipped_count += 1
+                continue
+
+            proposal_already_saved = existing_liveness != 'new'
+            has_check_attestation = proposal_id in checks
 
             proposal['tags'] = proposal['tags'].split(',')
             assert isinstance(proposal['tags'], list), "Expected tags to be a list, but got %s" % type(proposal['tags'])
+
+            # Check if this proposal has already failed validation before
+            if not has_check_attestation and not proposal_already_saved:
+                attester = to_eth_address(proposal_meta['author'])
+                validation_passed = await self.validate_proposal(proposal_id, attester, proposal['tags'])
+                if not validation_passed:
+                    print(f"Proposal {proposal_id}: validation failed, marking as unqualified")
+                    proposal['validation_failed'] = {
+                        "failed_at": int(time.time()),
+                        "reason": "validation_failed"
+                    }
+                    proposal_hash = self.calculate_proposal_hash(proposal)
+                    await self.overwrite_proposal(proposal, proposal_hash, 'unqualified', gcs_client)
+                    skipped_count += 1
+                    continue
+
+            authors_prop_type, approved_prop_type = await self.read_proposal_type(proposal_id)
 
             if approved_prop_type:
                 proposal['proposal_type'] = approved_prop_type
@@ -246,13 +337,6 @@ class EASOoDaoSync(Sync):
                 pass
             proposal['proposer_ens'] = None
             del proposal['author']            
-
-            try:
-                blob, existing_liveness, existing_proposal_hash, existing_num_of_votes = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
-            except SkipProposal as e:
-                print(e)
-                skipped_count += 1
-                continue
 
             votes = await self.read_votes_from_db(proposal_id)
             num_of_votes = len(votes)
@@ -318,17 +402,21 @@ class EASOoDaoSync(Sync):
 
             proposal['outcome'] = outcome
 
+            startts = int(proposal_meta['startts'])
+            endts = int(proposal_meta['endts'])
+
+            curts = int(time.time())
+
+            # Cache-busting fields to ensure proposals in different time phases have different hashes
+            proposal['after_start'] = curts >= startts
+            proposal['after_end'] = curts >= endts
+
             try:
                 proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
             except SkipProposal as e:
                 print(e)
                 skipped_count += 1
                 continue
-
-            startts = int(proposal_meta['startts'])
-            endts = int(proposal_meta['endts'])
-
-            curts = int(time.time())
 
             if curts >= startts:
                 start_block = await self.bc.last_block_before_timestamp(proposal['chain_id'], startts)
@@ -342,13 +430,55 @@ class EASOoDaoSync(Sync):
 
 
             if start_block > 0: # For OODAO, this means a block number is known.
-                proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block))
+                # For syndicate, use total supply of the token instead of votable supply
+                if self.infra_dao_slug == 'syndicate':
+                    # Get total supply from the token contract at the start block
+                    result = await self.bc.contract_call_encoded(
+                        self.token_chain_id,
+                        self.token_addr,
+                        start_block,
+                        'totalSupply()',
+                        []
+                    )
+                    total_supply = int(result['result'], 16)
+                    proposal['total_voting_power_at_start'] = str(total_supply)
+                else:
+                    # Default behavior for other tenants
+                    proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block, proposal['chain_id']))
 
                 if self.delegate_metadata is None:
                     self.delegate_metadata = await self.get_delegate_metadata()
 
                 if not reuse_tally:
-                    snapshot_vp = await self.get_vp_snapshot_all_delegates(start_block, gcs_client)
+                    snapshot_vp = await self.get_vp_snapshot_all_delegates(start_block, gcs_client, chain_id=proposal['chain_id'])
+
+                    snapshot_vp_lookup = {row['addr'].lower(): row for row in snapshot_vp}
+
+                    votes_out_updated = []
+                    outcome_updated = defaultdict(lambda: defaultdict(int))
+
+                    for vote in votes_out:
+                        addr = vote['voter'].lower()
+                        vp_entry = snapshot_vp_lookup.get(addr)
+
+                        if vp_entry:
+                            # Update vote weight with actual VP (delegation + nonivotes)
+                            vote['weight'] = vp_entry['vp']
+                            vote_weight = int(vp_entry['vp'])
+                        else:
+                            # Keep original weight if not in snapshot
+                            vote_weight = int(vote['weight'])
+
+                        # Recalculate outcome with correct VP
+                        outcome_updated['token-holders'][int(vote.get('support', 0))] += vote_weight
+                        votes_out_updated.append(vote)
+
+                    # Update outcome with recalculated values
+                    for key in outcome_updated['token-holders'].keys():
+                        outcome['token-holders'][str(key)] = str(outcome_updated['token-holders'][key])
+
+                    # Overwrite votes with VP-enriched data
+                    await self.overwrite_votes(votes_out_updated, proposal_id, gcs_client)
 
                     snapshot_vp_out = []
                     for row in snapshot_vp:
@@ -357,7 +487,7 @@ class EASOoDaoSync(Sync):
 
                             addr = row['addr'].lower()
                             record = copy.deepcopy(row)
-                            
+
                             try:
                                 ens = await self.bc.get_ens_lru(addr)
                                 if ens is not None:
@@ -368,8 +498,8 @@ class EASOoDaoSync(Sync):
                             delegate_metadata = self.delegate_metadata.get(addr, {})
 
                             record.update(delegate_metadata)
-                            
-                            snapshot_vp_out.append(record)                        
+
+                            snapshot_vp_out.append(record)
 
 
                     await self.overwrite_hasnt_voted(snapshot_vp_out, proposal_id, gcs_client)
