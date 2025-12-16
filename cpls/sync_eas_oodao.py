@@ -430,7 +430,21 @@ class EASOoDaoSync(Sync):
 
 
             if start_block > 0: # For OODAO, this means a block number is known.
-                proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block, proposal['chain_id']))
+                # For syndicate, use total supply of the token instead of votable supply
+                if self.infra_dao_slug == 'syndicate':
+                    # Get total supply from the token contract at the start block
+                    result = await self.bc.contract_call_encoded(
+                        self.token_chain_id,
+                        self.token_addr,
+                        start_block,
+                        'totalSupply()',
+                        []
+                    )
+                    total_supply = int(result['result'], 16)
+                    proposal['total_voting_power_at_start'] = str(total_supply)
+                else:
+                    # Default behavior for other tenants
+                    proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block, proposal['chain_id']))
 
                 if self.delegate_metadata is None:
                     self.delegate_metadata = await self.get_delegate_metadata()
