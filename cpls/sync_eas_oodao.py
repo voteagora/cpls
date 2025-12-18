@@ -316,7 +316,7 @@ class EASOoDaoSync(Sync):
             authors_prop_type, approved_prop_type = await self.read_proposal_type(proposal_id)
             if 'kwargs' in proposal:
                 proposal['kwargs'] = json.loads(proposal['kwargs'])
-
+                proposal['voting_module'] = proposal['kwargs']['voting_module']
             if approved_prop_type:
                 proposal['proposal_type'] = approved_prop_type
                 proposal['proposal_type_approval'] = 'APPROVED'
@@ -400,7 +400,47 @@ class EASOoDaoSync(Sync):
                     await self.overwrite_votes(votes_out, proposal_id, gcs_client)
 
                 elif proposal_type_name == 'APPROVAL': 
-                    raise NotImplementedError("Approval Types are Not implemented yet.")
+
+                    outcome = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+
+                    votes_out = []
+                    voter_set = []
+
+                    for vote in votes:
+
+                        copy_of_vote = copy.deepcopy(dict(vote))
+                        copy_of_vote['weight'] = str(int(vote['weight']))
+
+                        voter_set.append(copy_of_vote['voter'])
+                        addr = vote['voter'].lower()
+
+                        try:
+                            copy_of_vote['ens'] = await self.bc.get_ens_lru(addr)
+                        except:
+                            pass
+
+                        delegate_meta = self.delegate_metadata.get(addr, {})
+                        copy_of_vote.update(delegate_meta)
+
+                        support = vote['support']
+                        options = json.loads(support)
+                        weight = int(vote['weight'])
+
+                        for option in options:
+                            outcome['token-holders'][option][1] += weight
+
+                        copy_of_vote['params'] = options
+                        copy_of_vote['support'] = weight
+
+                        votes_out.append(copy_of_vote)
+
+                    voter_set = set(voter_set)
+
+                    for option_key in outcome['token-holders'].keys():
+                        for support_key in outcome['token-holders'][option_key].keys():
+                            outcome['token-holders'][option_key][support_key] = str(outcome['token-holders'][option_key][support_key])
+
+                    await self.overwrite_votes(votes_out, proposal_id, gcs_client)
                 else:
                     raise NotImplementedError(f"Proposal Type {proposal_type_name} is not implemented yet.")
 
@@ -519,13 +559,79 @@ class EASOoDaoSync(Sync):
                 if proposal_type_name == 'UNSET':
                     proposal['lifecycle_stage'] = 'EXPIRED'
                     liveness = 'archived'
+                elif proposal_type_name == 'OPTIMISTIC':
+                    # For OPTIMISTIC type:
+                    # Quorum = forVotes + abstainVotes (total votes)
+                    # If quorum not met -> SUCCEEDED (optimistic passes by default)
+                    # If quorum met and against votes > threshold -> DEFEATED
+                    # Otherwise -> SUCCEEDED
+
+                    outcome_data = proposal['outcome']['token-holders']
+
+                    for_votes = int(outcome_data.get('1', 0))
+                    against_votes = int(outcome_data.get('0', 0))
+                    abstain_votes = int(outcome_data.get('2', 0))
+                    total_votes = for_votes + against_votes + abstain_votes
+                    passing_quorum = (proposal['proposal_type']['quorum'] / 10000) * int(proposal['total_voting_power_at_start'])
+                    quorum_check = total_votes >= passing_quorum
+                    proposal['quorum_check'] = quorum_check
+
+                    if not quorum_check:
+                        # Optimistic proposals pass if quorum not met
+                        proposal['lifecycle_stage'] = 'SUCCEEDED'
+                    else:
+                        # Check if against votes exceed threshold
+                        threshold = proposal['proposal_type'].get('threshold', 0)
+                        threshold_value = (threshold / 10000) * int(proposal['total_voting_power_at_start'])
+                        
+                        if against_votes > threshold_value:
+                            proposal['lifecycle_stage'] = 'DEFEATED'
+                        else:
+                            proposal['lifecycle_stage'] = 'SUCCEEDED'
+                elif proposal_type_name == 'APPROVAL':
+                    # For APPROVAL type:
+                    # Quorum = forVotes + abstainVotes (total votes)
+                    # If quorum not met -> DEFEATED
+                    # If criteria == THRESHOLD: any option > criteriaValue -> SUCCEEDED, else DEFEATED
+                    # Otherwise -> SUCCEEDED
+
+                    outcome_data = proposal['outcome']['token-holders']
+
+                    # Sum all votes across options (for + abstain = total)
+                    total_votes = 0
+                    for option_key, support_dict in outcome_data.items():
+                        for support_val in support_dict.values():
+                            total_votes += int(support_val)
+
+                    passing_quorum = (proposal['proposal_type']['quorum'] / 10000) * int(proposal['total_voting_power_at_start'])
+                    quorum_check = total_votes >= passing_quorum
+                    proposal['quorum_check'] = quorum_check
+
+                    if not quorum_check:
+                        proposal['lifecycle_stage'] = 'DEFEATED'
+                    else:
+                        # Check if criteria is THRESHOLD
+                        criteria = proposal['proposal_type'].get('criteria', None)
+                        thresold = proposal['proposal_type'].get('threshold', 0)
+                        
+                        if criteria == 'THRESHOLD':
+                            # Any option exceeding threshold -> SUCCEEDED
+                            succeeded = False
+                            for option_key, support_dict in outcome_data.items():
+                                option_votes = sum(int(v) for v in support_dict.values())
+                                if option_votes > thresold:
+                                    succeeded = True
+                                    break
+                            proposal['lifecycle_stage'] = 'SUCCEEDED' if succeeded else 'DEFEATED'
+                        else:
+                            proposal['lifecycle_stage'] = 'SUCCEEDED'
                 else:
 
                     # TODO - Count Abstain?
 
                     passing_quorum = (proposal['proposal_type']['quorum'] / 10000) * int(proposal['total_voting_power_at_start'])
                     passing_approval_threshold = (proposal['proposal_type']['approval_threshold'] / 10000) * int(proposal['total_voting_power_at_start'])
-                    
+
                     quorum_check = sum([int(weight) for weight in proposal['outcome']['token-holders'].values()]) >= passing_quorum
                     approval_check = int(proposal['outcome']['token-holders'].get('1', 0)) >= passing_approval_threshold
 
