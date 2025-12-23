@@ -27,6 +27,17 @@ RESET_PROPOSALS_ON_RESTART = os.getenv("RESET_PROPOSALS_ON_RESTART", "true").low
 PROPOSAL_CHECK_API_URL = os.getenv("PROPOSAL_CHECK_API_URL", "")
 PROPOSAL_CHECK_SECRET = os.getenv("PROPOSAL_CHECK_SECRET", "")
 
+PROPOSAL_CHECK_PREFIXES = {
+    "syndicate": "https://www.syndicatecollective.org/",
+    "towns": "https://www.townslodge.com/",
+}
+
+def get_proposal_check_api_url(dao_slug: str) -> str:
+    prefix = PROPOSAL_CHECK_PREFIXES.get(dao_slug, "")
+    if not prefix or not PROPOSAL_CHECK_API_URL:
+        return ""
+    return f"{prefix.rstrip('/')}{PROPOSAL_CHECK_API_URL}"
+
 # Print all environment variables
 print("=" * 60)
 print("Environment Variables Configuration")
