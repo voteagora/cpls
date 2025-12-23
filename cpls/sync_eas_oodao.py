@@ -431,7 +431,7 @@ class EASOoDaoSync(Sync):
 
             if start_block > 0: # For OODAO, this means a block number is known.
                 # For syndicate, use total supply of the token instead of votable supply
-                if self.infra_dao_slug == 'syndicate':
+                if self.infra_dao_slug in ('syndicate', 'towns'):
                     # Get total supply from the token contract at the start block
                     result = await self.bc.contract_call_encoded(
                         self.token_chain_id,
