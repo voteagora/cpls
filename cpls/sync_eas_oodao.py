@@ -314,9 +314,16 @@ class EASOoDaoSync(Sync):
                     continue
 
             authors_prop_type, approved_prop_type = await self.read_proposal_type(proposal_id)
-            if 'kwargs' in proposal:
-                proposal['kwargs'] = json.loads(proposal['kwargs'])
-                proposal['voting_module'] = proposal['kwargs']['voting_module']
+            if 'kwargs' in proposal and proposal['kwargs'] is not None:
+                # Always store kwargs as a string in the final proposal blob.
+                # If the original value was a dict, we still try to preserve
+                # the voting_module field separately.
+                orig_kwargs = proposal['kwargs']
+                if isinstance(orig_kwargs, dict):
+                    voting_module = orig_kwargs.get('voting_module')
+                    if voting_module is not None:
+                        proposal['voting_module'] = voting_module
+                proposal['kwargs'] = str(orig_kwargs)
             if approved_prop_type:
                 proposal['proposal_type'] = approved_prop_type
                 proposal['proposal_type_approval'] = 'APPROVED'
