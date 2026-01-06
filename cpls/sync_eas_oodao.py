@@ -628,8 +628,15 @@ class EASOoDaoSync(Sync):
                     # Sum all votes across options (for + abstain = total)
                     total_votes = 0
                     for option_key, support_dict in outcome_data.items():
-                        for support_val in support_dict.values():
-                            total_votes += int(support_val)
+                        try:
+                            if isinstance(support_dict, dict):
+                                for support_val in support_dict.values():
+                                    total_votes += int(support_val)
+                            else:
+                                total_votes += int(support_dict)
+                        except (ValueError, TypeError) as e:
+                            print(f"Warning: Failed to process votes for option {option_key}: {e}")
+                            print(f"Support dict value: {support_dict}, type: {type(support_dict)}")
 
                     passing_quorum = (proposal['proposal_type']['quorum'] / 10000) * int(proposal['total_voting_power_at_start'])
                     quorum_check = total_votes >= passing_quorum
@@ -646,10 +653,18 @@ class EASOoDaoSync(Sync):
                             # Any option exceeding threshold -> SUCCEEDED
                             succeeded = False
                             for option_key, support_dict in outcome_data.items():
-                                option_votes = sum(int(v) for v in support_dict.values())
-                                if option_votes > thresold:
-                                    succeeded = True
-                                    break
+                                try:
+                                    if isinstance(support_dict, dict):
+                                        option_votes = sum(int(v) for v in support_dict.values())
+                                    else:
+                                        option_votes = int(support_dict)
+                                    
+                                    if option_votes > thresold:
+                                        succeeded = True
+                                        break
+                                except (ValueError, TypeError) as e:
+                                    print(f"Warning: Failed to process threshold check for option {option_key}: {e}")
+                                    print(f"Support dict value: {support_dict}, type: {type(support_dict)}")
                             proposal['lifecycle_stage'] = 'SUCCEEDED' if succeeded else 'DEFEATED'
                         else:
                             proposal['lifecycle_stage'] = 'SUCCEEDED'
