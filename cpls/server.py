@@ -9,7 +9,7 @@ from typing import Dict
 from collections import defaultdict
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -20,7 +20,8 @@ from .gcs import GCSClient
 from .jobs import JobQueue, JobRequest, JobStatus
 import time
 
-from .config import INFRA_DAO_SLUGS, ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHEDULER_INTERVAL_MINUTES, load_tenant_configs, RESET_PROPOSALS_ON_RESTART
+from .config import INFRA_DAO_SLUGS, ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHEDULER_INTERVAL_MINUTES, load_tenant_configs, RESET_PROPOSALS_ON_RESTART, DEPLOYMENT
+import yaml
 
 
 reset_tracker = defaultdict(lambda: RESET_PROPOSALS_ON_RESTART)
@@ -210,6 +211,49 @@ async def health_check():
         "current_job": job_queue.current_job.id if job_queue.current_job else None
     }
 
+
+@app.post("/admin/tenants/{infra_dao_slug}")
+async def add_tenant(infra_dao_slug: str, request: Request):
+    """
+    Add a new tenant to the scheduler.
+    Accepts YAML config in request body.
+    """
+    body = await request.body()
+    try:
+        config_data = yaml.safe_load(body)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {e}")
+
+    if not config_data:
+        raise HTTPException(status_code=400, detail="Empty config")
+
+    if DEPLOYMENT not in config_data.get('deployments', {}):
+        raise HTTPException(status_code=400, detail=f"Deployment {DEPLOYMENT} not found in config")
+
+    deployment = config_data['deployments'][DEPLOYMENT]
+    del config_data['deployments']
+    config_data['deployment'] = deployment
+    config = config_data
+
+    assert infra_dao_slug == config['schema']
+
+    scheduler.add_job(
+        scheduled_proposal_job,
+        'interval',
+        minutes=SCHEDULER_INTERVAL_MINUTES,
+        id=f'scheduled-proposal-job-{infra_dao_slug}',
+        max_instances=1,
+        kwargs={'config': config, 'infra_dao_slug': infra_dao_slug}
+    )
+
+    print(f"Refreshed tenant {infra_dao_slug}")
+
+    return {
+        "status": "added",
+        "tenant": infra_dao_slug,
+        "scheduler_interval_minutes": SCHEDULER_INTERVAL_MINUTES,
+        "features": config.get('features', {}),
+    }
 
 if __name__ == "__main__":
     print(f"Starting server in {ENVIRONMENT} mode")
