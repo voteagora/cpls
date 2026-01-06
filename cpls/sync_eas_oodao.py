@@ -438,14 +438,27 @@ class EASOoDaoSync(Sync):
                         copy_of_vote.update(delegate_meta)
 
                         support = vote['support']
-                        options = json.loads(support)
                         weight = int(vote['weight'])
 
-                        for option in options:
-                            outcome['token-holders'][option][1] += weight
+                        try:
+                            if isinstance(support, str):
+                                options = json.loads(support)
+                            else:
+                                options = support
 
-                        copy_of_vote['params'] = options
-                        copy_of_vote['support'] = weight
+                            if not isinstance(options, (list, tuple)):
+                                options = [options]
+
+                            for option in options:
+                                outcome['token-holders'][option][1] += weight
+
+                            copy_of_vote['params'] = options
+                            copy_of_vote['support'] = weight
+                        except (json.JSONDecodeError, TypeError, KeyError) as e:
+                            print(f"Warning: Failed to process vote for {copy_of_vote.get('voter', 'unknown')}: {e}")
+                            print(f"Support value: {support}, type: {type(support)}")
+                            copy_of_vote['params'] = []
+                            copy_of_vote['support'] = weight
 
                         votes_out.append(copy_of_vote)
 
