@@ -421,10 +421,13 @@ class EASOoDaoSync(Sync):
                     await self.overwrite_votes(votes_out, proposal_id, gcs_client)
 
                 elif proposal_type_name == 'APPROVAL': 
-                    print(f"Proposal {proposal_id}: unsupported proposal type {proposal_type_name} for infra_dao_slug={self.infra_dao_slug}")
-                    raise NotImplementedError("Approval Types are Not implemented yet.")
+                    print(f"Proposal {proposal_id}: unsupported proposal type {proposal_type_name} for infra_dao_slug={self.infra_dao_slug} — skipping")
+                    skipped_count += 1
+                    continue
                 else:
-                    raise NotImplementedError(f"Proposal Type {proposal_type_name} is not implemented yet.")
+                    print(f"Proposal {proposal_id}: unsupported proposal type {proposal_type_name} for infra_dao_slug={self.infra_dao_slug} — skipping")
+                    skipped_count += 1
+                    continue
 
             proposal['outcome'] = outcome
 
