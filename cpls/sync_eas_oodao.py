@@ -73,6 +73,13 @@ class EASOoDaoSync(Sync):
             self.token_addr = self.config['deployment']['token']['address']
             self.token_chain_id = self.config['deployment']['chain_id']
 
+            if 'token_2' in self.config['deployment']:
+                self.token_2_addr = self.config['deployment']['token_2']['address']
+                self.token_2_chain_id = self.config['deployment']['token_2']['chain_id']
+            else:
+                self.token_2_addr = None
+                self.token_2_chain_id = None
+
             self.dao_slug = self.config['dao_slug'] # This is the capitals one, in the DB.  infra_dao_slug is the lowercase one that matches the DB schema and tenants config file names.
 
         except:
@@ -450,15 +457,35 @@ class EASOoDaoSync(Sync):
             if start_block > 0: # For OODAO, this means a block number is known.
                 # For syndicate, use total supply of the token instead of votable supply
                 if self.infra_dao_slug in ('syndicate', 'towns'):
+                    if proposal['chain_id'] != self.token_chain_id:
+                        start_block_of_token_1 = await self.bc.last_block_before_timestamp(self.token_chain_id, startts)
+                    else:
+                        start_block_of_token_1 = start_block
                     # Get total supply from the token contract at the start block
                     result = await self.bc.contract_call_encoded(
                         self.token_chain_id,
                         self.token_addr,
-                        start_block,
+                        start_block_of_token_1,
                         'totalSupply()',
                         []
                     )
                     total_supply = int(result['result'], 16)
+                    
+                    if self.token_2_addr:
+                        if proposal['chain_id'] != self.token_2_chain_id:
+                            start_block_of_token_2 = await self.bc.last_block_before_timestamp(self.token_2_chain_id, startts)
+                        else:
+                            start_block_of_token_2 = start_block
+                        result_2 = await self.bc.contract_call_encoded(
+                            self.token_2_chain_id,
+                            self.token_2_addr,
+                            start_block_of_token_2,
+                            'totalSupply()',
+                            []
+                        )
+                        total_supply_2 = int(result_2['result'], 16)
+                        total_supply += total_supply_2
+                    
                     proposal['total_voting_power_at_start'] = str(total_supply)
                 else:
                     # Default behavior for other tenants
