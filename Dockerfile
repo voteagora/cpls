@@ -15,7 +15,8 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # Clone private GitHub repo into /config
 ARG GITHUB_TOKEN
-RUN git clone https://${GITHUB_TOKEN}@github.com/voteagora/tenants.git /config && \
+RUN rm -rf /config && \
+    git clone https://${GITHUB_TOKEN}@github.com/voteagora/tenants.git /config && \
     cd /config && \
     echo "Cloned commit SHA: $(git rev-parse HEAD)"
 
