@@ -29,7 +29,7 @@ PROPOSAL_CHECK_SECRET = os.getenv("PROPOSAL_CHECK_SECRET", "")
 
 PROPOSAL_CHECK_PREFIXES = {
     "syndicate": "https://www.syndicatecollective.org/",
-    "towns": "https://www.townslodge.com/",
+    "towns": "https://agora-next-towns-git-aarna-tax-forms-cta-voteagora.vercel.app/",
 }
 
 def get_proposal_check_api_url(dao_slug: str) -> str:
