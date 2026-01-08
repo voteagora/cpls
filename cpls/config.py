@@ -28,13 +28,13 @@ PROPOSAL_CHECK_API_URL = os.getenv("PROPOSAL_CHECK_API_URL", "")
 PROPOSAL_CHECK_SECRET = os.getenv("PROPOSAL_CHECK_SECRET", "")
 
 PROPOSAL_CHECK_PREFIXES_PROD = {
-    "syndicate": "https://www.syndicatecollective.org/",
-    "towns": "https://www.townslodge.com/",
+  "syndicate": "https://www.syndicatecollective.org/",
+  "towns": "https://www.townslodge.com/",
 }
 
 PROPOSAL_CHECK_PREFIXES_DEV = {
-    "syndicate": "https://agora-next-syndicate-git-towns-copy-changes-voteagora.vercel.app/",
-    "towns": "https://agora-next-towns-git-towns-copy-changes-voteagora.vercel.app/",
+  "syndicate": "https://agora-next-syndicate-git-sudheerdev-patch-1-voteagora.vercel.app/",
+  "towns": "https://agora-next-towns-git-sudheerdev-patch-1-voteagora.vercel.app/",
 }
 
 def get_proposal_check_api_url(dao_slug: str) -> str:
