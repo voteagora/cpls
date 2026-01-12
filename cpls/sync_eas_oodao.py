@@ -416,7 +416,10 @@ class EASOoDaoSync(Sync):
 
                 elif proposal_type_name == 'APPROVAL': 
 
-                    outcome = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+                    outcome = {
+                        'token-holders': defaultdict(lambda: defaultdict(int)),
+                        'no-param': defaultdict(int)
+                    }
 
                     votes_out = []
                     voter_set = []
@@ -442,7 +445,13 @@ class EASOoDaoSync(Sync):
 
                         try:
                             if isinstance(support, str):
-                                options = json.loads(support)
+                                if ',' in support:
+                                    options = [int(x.strip()) for x in support.split(',')]
+                                else:
+                                    try:
+                                        options = json.loads(support)
+                                    except json.JSONDecodeError:
+                                        options = [int(support)]
                             else:
                                 options = support
 
@@ -450,11 +459,13 @@ class EASOoDaoSync(Sync):
                                 options = [options]
 
                             for option in options:
-                                outcome['token-holders'][option][1] += weight
+                                outcome['token-holders'][str(option)][1] += weight
+
+                            outcome['no-param'][1] += weight
 
                             copy_of_vote['params'] = options
                             copy_of_vote['support'] = weight
-                        except (json.JSONDecodeError, TypeError, KeyError) as e:
+                        except (TypeError, KeyError, ValueError) as e:
                             print(f"Warning: Failed to process vote for {copy_of_vote.get('voter', 'unknown')}: {e}")
                             print(f"Support value: {support}, type: {type(support)}")
                             copy_of_vote['params'] = []
@@ -467,6 +478,9 @@ class EASOoDaoSync(Sync):
                     for option_key in outcome['token-holders'].keys():
                         for support_key in outcome['token-holders'][option_key].keys():
                             outcome['token-holders'][option_key][support_key] = str(outcome['token-holders'][option_key][support_key])
+
+                    for support_key in outcome['no-param'].keys():
+                        outcome['no-param'][support_key] = str(outcome['no-param'][support_key])
 
                     await self.overwrite_votes(votes_out, proposal_id, gcs_client)
                 else:
@@ -527,27 +541,63 @@ class EASOoDaoSync(Sync):
                     snapshot_vp_lookup = {row['addr'].lower(): row for row in snapshot_vp}
 
                     votes_out_updated = []
-                    outcome_updated = defaultdict(lambda: defaultdict(int))
 
-                    for vote in votes_out:
-                        addr = vote['voter'].lower()
-                        vp_entry = snapshot_vp_lookup.get(addr)
+                    if proposal_type_name == 'APPROVAL':
+                        outcome_updated = {
+                            'token-holders': defaultdict(lambda: defaultdict(int)),
+                            'no-param': defaultdict(int)
+                        }
 
-                        if vp_entry:
-                            # Update vote weight with actual VP (delegation + nonivotes)
-                            vote['weight'] = vp_entry['vp']
-                            vote_weight = int(vp_entry['vp'])
-                        else:
-                            # Keep original weight if not in snapshot
-                            vote_weight = int(vote['weight'])
+                        for vote in votes_out:
+                            addr = vote['voter'].lower()
+                            vp_entry = snapshot_vp_lookup.get(addr)
 
-                        # Recalculate outcome with correct VP
-                        outcome_updated['token-holders'][int(vote.get('support', 0))] += vote_weight
-                        votes_out_updated.append(vote)
+                            if vp_entry:
+                                # Update vote weight with actual VP (delegation + nonivotes)
+                                vote['weight'] = vp_entry['vp']
+                                vote_weight = int(vp_entry['vp'])
+                            else:
+                                # Keep original weight if not in snapshot
+                                vote_weight = int(vote['weight'])
 
-                    # Update outcome with recalculated values
-                    for key in outcome_updated['token-holders'].keys():
-                        outcome['token-holders'][str(key)] = str(outcome_updated['token-holders'][key])
+                            # Recalculate outcome with correct VP for APPROVAL proposals
+                            params = vote.get('params', [])
+                            if params:
+                                for option in params:
+                                    outcome_updated['token-holders'][str(option)][1] += vote_weight
+                                outcome_updated['no-param'][1] += vote_weight
+
+                            votes_out_updated.append(vote)
+
+                        # Update outcome with recalculated values
+                        for option_key in outcome_updated['token-holders'].keys():
+                            for support_key in outcome_updated['token-holders'][option_key].keys():
+                                outcome['token-holders'][option_key][support_key] = str(outcome_updated['token-holders'][option_key][support_key])
+
+                        for support_key in outcome_updated['no-param'].keys():
+                            outcome['no-param'][support_key] = str(outcome_updated['no-param'][support_key])
+                    else:
+                        outcome_updated = defaultdict(lambda: defaultdict(int))
+
+                        for vote in votes_out:
+                            addr = vote['voter'].lower()
+                            vp_entry = snapshot_vp_lookup.get(addr)
+
+                            if vp_entry:
+                                # Update vote weight with actual VP (delegation + nonivotes)
+                                vote['weight'] = vp_entry['vp']
+                                vote_weight = int(vp_entry['vp'])
+                            else:
+                                # Keep original weight if not in snapshot
+                                vote_weight = int(vote['weight'])
+
+                            # Recalculate outcome with correct VP for STANDARD/OPTIMISTIC proposals
+                            outcome_updated['token-holders'][int(vote.get('support', 0))] += vote_weight
+                            votes_out_updated.append(vote)
+
+                        # Update outcome with recalculated values
+                        for key in outcome_updated['token-holders'].keys():
+                            outcome['token-holders'][str(key)] = str(outcome_updated['token-holders'][key])
 
                     # Overwrite votes with VP-enriched data
                     await self.overwrite_votes(votes_out_updated, proposal_id, gcs_client)
