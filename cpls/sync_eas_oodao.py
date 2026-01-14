@@ -374,12 +374,7 @@ class EASOoDaoSync(Sync):
                 proposal['default_proposal_type_ranges'] = default_type_ranges
 
             voting_module = proposal.get('voting_module')
-            if isinstance(voting_module, str) and voting_module.lower() in ('standard', 'optimistic', 'approval'):
-                proposal_type_name = voting_module.upper()
-            elif 'proposal_type' in proposal and isinstance(proposal['proposal_type'], dict):
-                proposal_type_name = proposal['proposal_type'].get('class', 'STANDARD')
-            else:
-                proposal_type_name = 'STANDARD'
+            proposal_type_name = voting_module.upper() if isinstance(voting_module, str) and voting_module.lower() in ('standard', 'optimistic', 'approval') else 'STANDARD'
             
             proposal['proposer'] = to_eth_address(proposal_meta['author'])
             try:
