@@ -33,8 +33,8 @@ PROPOSAL_CHECK_PREFIXES_PROD = {
 }
 
 PROPOSAL_CHECK_PREFIXES_DEV = {
-  "syndicate": "https://agora-next-syndicate-git-sudheerdev-patch-1-voteagora.vercel.app/",
-  "towns": "https://agora-next-towns-git-sudheerdev-patch-1-voteagora.vercel.app/",
+  "syndicate": "https://agora-next-syndicate-git-feat-proposalcheckpr-voteagora.vercel.app/",
+  "towns": "https://agora-next-towns-git-feat-proposalcheckpr-voteagora.vercel.app/",
 }
 
 def get_proposal_check_api_url(dao_slug: str) -> str:

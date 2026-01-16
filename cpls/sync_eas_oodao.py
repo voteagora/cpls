@@ -626,8 +626,18 @@ class EASOoDaoSync(Sync):
 
                     await self.overwrite_hasnt_voted(snapshot_vp_out, proposal_id, gcs_client)
             
+            # Handle lifecycle states in priority order
+            # CANCELLED takes precedence over all other states
             if 'delete_event' in proposal:
                 proposal['lifecycle_stage'] = 'CANCELLED'
+            # EXECUTED takes precedence over QUEUED and SUCCEEDED
+            elif 'execute_event' in proposal:
+                proposal['lifecycle_stage'] = 'EXECUTED'
+                liveness = 'archived'
+            # QUEUED takes precedence over SUCCEEDED
+            elif 'queue_event' in proposal:
+                proposal['lifecycle_stage'] = 'QUEUED'
+            # Time-based states
             elif curts < startts:
                 proposal['lifecycle_stage'] = 'PENDING'
             elif startts <= curts < endts:
@@ -640,7 +650,7 @@ class EASOoDaoSync(Sync):
                 elif proposal_type_name == 'OPTIMISTIC':
                     # For OPTIMISTIC type:
                     # Quorum = forVotes + abstainVotes (total votes)
-                    # If quorum not met -> SUCCEEDED (optimistic passes by default)
+                    # If quorum not met -> PASSED (optimistic passes by default)
                     # If quorum met and against votes > threshold -> DEFEATED
                     # Otherwise -> SUCCEEDED
 
