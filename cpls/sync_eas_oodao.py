@@ -440,18 +440,18 @@ class EASOoDaoSync(Sync):
                         delegate_meta = self.delegate_metadata.get(addr, {})
                         copy_of_vote.update(delegate_meta)
 
-                        support = vote['support']
+                        support = "1"
                         weight = int(vote['weight'])
 
                         try:
-                            if isinstance(support, str):
-                                if ',' in support:
-                                    options = [int(x.strip()) for x in support.split(',')]
+                            if isinstance(vote['support'], str):
+                                if ',' in vote['support']:
+                                    options = [int(x.strip()) for x in vote['support'].split(',')]
                                 else:
                                     try:
-                                        options = json.loads(support)
+                                        options = json.loads(vote['support'])
                                     except json.JSONDecodeError:
-                                        options = [int(support)]
+                                        options = [int(vote['support'])]
                             else:
                                 options = support
 
@@ -630,13 +630,6 @@ class EASOoDaoSync(Sync):
             # CANCELLED takes precedence over all other states
             if 'delete_event' in proposal:
                 proposal['lifecycle_stage'] = 'CANCELLED'
-            # EXECUTED takes precedence over QUEUED and SUCCEEDED
-            elif 'execute_event' in proposal:
-                proposal['lifecycle_stage'] = 'EXECUTED'
-                liveness = 'archived'
-            # QUEUED takes precedence over SUCCEEDED
-            elif 'queue_event' in proposal:
-                proposal['lifecycle_stage'] = 'QUEUED'
             # Time-based states
             elif curts < startts:
                 proposal['lifecycle_stage'] = 'PENDING'
@@ -650,7 +643,7 @@ class EASOoDaoSync(Sync):
                 elif proposal_type_name == 'OPTIMISTIC':
                     # For OPTIMISTIC type:
                     # Quorum = forVotes + abstainVotes (total votes)
-                    # If quorum not met -> PASSED (optimistic passes by default)
+                    # If quorum not met -> SUCCEDED (optimistic passes by default)
                     # If quorum met and against votes > threshold -> DEFEATED
                     # Otherwise -> SUCCEEDED
 
@@ -742,7 +735,7 @@ class EASOoDaoSync(Sync):
                     proposal['approval_check'] = approval_check
 
                     if quorum_check and approval_check:
-                        proposal['lifecycle_stage'] = 'PASSED'
+                        proposal['lifecycle_stage'] = 'SUCCEEDED'
                         
                     else:
                         proposal['lifecycle_stage'] = 'DEFEATED'
