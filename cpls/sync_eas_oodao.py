@@ -464,12 +464,12 @@ class EASOoDaoSync(Sync):
                             outcome['no-param'][1] += weight
 
                             copy_of_vote['params'] = options
-                            copy_of_vote['support'] = weight
+                            copy_of_vote['support'] = "1"
                         except (TypeError, KeyError, ValueError) as e:
                             print(f"Warning: Failed to process vote for {copy_of_vote.get('voter', 'unknown')}: {e}")
                             print(f"Support value: {support}, type: {type(support)}")
                             copy_of_vote['params'] = []
-                            copy_of_vote['support'] = weight
+                            copy_of_vote['support'] = "1"
 
                         votes_out.append(copy_of_vote)
 
