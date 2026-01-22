@@ -11,6 +11,8 @@ from .title_processor import get_title_from_proposal_description
 
 from .config import ALCHEMY_API_KEY
 
+S9_BLOCK_NUMBER = 146161869
+
 class EASAtlasSync(Sync):
 
     SOURCE = 'eas-atlas'
@@ -26,14 +28,14 @@ class EASAtlasSync(Sync):
             return rows
     
 
-    async def read_citizens(self):
-        qry = """SELECT 
+    async def read_citizens(self, season):
+        qry = f"""SELECT 
             c."address" as addr, 
             1 as vp, 
             citizen_type,
             voter_metadata_text::json->>'name' name, 
             voter_metadata_text::json->>'image' image
-        FROM atlas.citizens_mat c"""
+        FROM atlas.citizens_mat_s{season} c"""
 
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
@@ -61,7 +63,8 @@ class EASAtlasSync(Sync):
         #
 
         govless_proposal_set = await self.read_govless_proposal_set()
-        citizens = await self.read_citizens()
+        citizens_s8 = await self.read_citizens(8)
+        citizens_s9 = await self.read_citizens(9)
         
         known_create_attestations = await self.read_proposal_create_attestations()
 
@@ -170,7 +173,15 @@ class EASAtlasSync(Sync):
                     continue
 
                 set_of_voters = set(row['voter'].lower() for row in votes)
-                has_not_voted = [row for row in citizens if row['addr'].lower() not in set_of_voters]
+                block_number = proposal['start_block']
+                if chain_id == 10 and block_number >= S9_BLOCK_NUMBER:
+                    citizen_list = citizens_s9
+                elif chain_id == 10 and block_number < S9_BLOCK_NUMBER:
+                    citizen_list = citizens_s8
+                else: # This case shouldnt exist, why are we looking at chain ID 1 at all?
+                    citizen_list = citizens_s8
+                
+                has_not_voted = [row for row in citizen_list if row['addr'] and row['addr'].lower() not in set_of_voters]
                 await self.overwrite_hasnt_voted(has_not_voted, proposal_id, gcs_client)
                 
                 # This section here, enriches the proposal object, in a way that will only update,
