@@ -11,6 +11,8 @@ from .title_processor import get_title_from_proposal_description
 
 from .config import ALCHEMY_API_KEY
 
+S9_BLOCK_NUMBER = 146161869
+
 class EASAtlasSync(Sync):
 
     SOURCE = 'eas-atlas'
