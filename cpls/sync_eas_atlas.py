@@ -173,15 +173,15 @@ class EASAtlasSync(Sync):
                     continue
 
                 set_of_voters = set(row['voter'].lower() for row in votes)
-
-                if chain_id = 10 and block_number >= S9_BLOCK_NUMBER:
+                block_number = proposal['start_block']
+                if chain_id == 10 and block_number >= S9_BLOCK_NUMBER:
                     citizen_list = citizens_s9
-                elif chain_id = 10 and block_number < S9_BLOCK_NUMBER:
+                elif chain_id == 10 and block_number < S9_BLOCK_NUMBER:
                     citizen_list = citizens_s8
                 else: # This case shouldnt exist, why are we looking at chain ID 1 at all?
                     citizen_list = citizens_s8
                 
-                has_not_voted = [row for row in citizens if row['addr'].lower() not in set_of_voters]
+                has_not_voted = [row for row in citizen_list if row['addr'] and row['addr'].lower() not in set_of_voters]
                 await self.overwrite_hasnt_voted(has_not_voted, proposal_id, gcs_client)
                 
                 # This section here, enriches the proposal object, in a way that will only update,
