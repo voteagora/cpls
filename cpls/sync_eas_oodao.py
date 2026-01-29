@@ -1,4 +1,4 @@
-import json, time, copy
+import json, time, copy, ast
 from collections import defaultdict
 
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS, to_eth_address
@@ -264,7 +264,6 @@ class EASOoDaoSync(Sync):
             proposal = dict(proposal_meta)
 
             proposal_id = proposal_meta['proposal_id']
-
             if proposal['uid'] in deletions:
                 proposal['delete_event'] = deletions[proposal['uid']]
 
@@ -315,23 +314,38 @@ class EASOoDaoSync(Sync):
 
             authors_prop_type, approved_prop_type = await self.read_proposal_type(proposal_id)
             if 'kwargs' in proposal and proposal['kwargs'] is not None:
-                # Normalize kwargs to a JSON object (dict) when possible.
-                # Also lift voting_module to the top-level for convenience.
                 orig_kwargs = proposal['kwargs']
-                parsed_kwargs = orig_kwargs
-                if isinstance(orig_kwargs, str):
-                    try:
-                        parsed_kwargs = json.loads(orig_kwargs)
-                    except Exception:
-                        parsed_kwargs = orig_kwargs
+                if not isinstance(orig_kwargs, str):
+                    print(f"Proposal {proposal_id}: kwargs is not a string: {type(orig_kwargs)}, skipping proposal")
+                    skipped_count += 1
+                    continue
 
-                if isinstance(parsed_kwargs, dict):
-                    voting_module = parsed_kwargs.get('voting_module')
-                    if voting_module is not None:
-                        proposal['voting_module'] = voting_module
-                    proposal['kwargs'] = parsed_kwargs
-                else:
-                    proposal['kwargs'] = orig_kwargs
+                if not orig_kwargs:
+                    print(f"Proposal {proposal_id}: Empty kwargs string, skipping proposal")
+                    skipped_count += 1
+                    continue
+
+                # Try parsing as JSON first (handles double quotes), then Python dict literal (handles single quotes)
+                parsed_kwargs = None
+                try:
+                    parsed_kwargs = json.loads(orig_kwargs)
+                except json.JSONDecodeError:
+                    try:
+                        parsed_kwargs = ast.literal_eval(orig_kwargs)
+                    except Exception as e:
+                        print(f"Proposal {proposal_id}: Failed to parse kwargs as JSON or Python dict: {e}, skipping proposal")
+                        skipped_count += 1
+                        continue
+
+                if not isinstance(parsed_kwargs, dict):
+                    print(f"Proposal {proposal_id}: kwargs is not a dict: {type(parsed_kwargs)}, skipping proposal")
+                    skipped_count += 1
+                    continue
+
+                proposal['kwargs'] = parsed_kwargs
+                proposal['voting_module'] = parsed_kwargs.get('voting_module')
+                if 'voting_module' in proposal['kwargs']:
+                    del proposal['kwargs']['voting_module']
             if approved_prop_type:
                 proposal['proposal_type'] = approved_prop_type
                 proposal['proposal_type_approval'] = 'APPROVED'
@@ -348,14 +362,18 @@ class EASOoDaoSync(Sync):
                 proposal['default_proposal_type_ranges'] = default_type_ranges
 
             voting_module = proposal.get('voting_module')
-            proposal_type_name = voting_module.upper() if isinstance(voting_module, str) and voting_module.lower() in ('standard', 'optimistic', 'approval') else 'STANDARD'
+            if isinstance(voting_module, str) and voting_module.lower() in ('standard', 'optimistic', 'approval'):
+                proposal_type_name = voting_module.upper()
+            elif 'proposal_type' in proposal and isinstance(proposal['proposal_type'], dict):
+                proposal_type_name = proposal['proposal_type'].get('class', 'STANDARD')
+            else:
+                proposal_type_name = 'STANDARD'
             
             proposal['proposer'] = to_eth_address(proposal_meta['author'])
             try:
                 proposal['proposer_ens'] = await self.bc.get_ens_lru(proposal['proposer'])
             except:
-                pass
-            proposal['proposer_ens'] = None
+                proposal['proposer_ens'] = None
             del proposal['author']            
 
             votes = await self.read_votes_from_db(proposal_id)
@@ -441,20 +459,22 @@ class EASOoDaoSync(Sync):
                         delegate_meta = self.delegate_metadata.get(addr, {})
                         copy_of_vote.update(delegate_meta)
 
-                        support = "1"
+                        support = vote['support']
                         weight = int(vote['weight'])
 
                         try:
-                            if isinstance(vote['support'], str):
-                                if ',' in vote['support']:
-                                    options = [int(x.strip()) for x in vote['support'].split(',')]
+                            if isinstance(support, str):
+                                if ',' in support:
+                                    options = [int(x.strip()) for x in support.split(',')]
                                 else:
                                     try:
-                                        options = json.loads(vote['support'])
+                                        options = json.loads(support)
                                     except json.JSONDecodeError:
-                                        options = [int(vote['support'])]
+                                        options = [int(support)]
+                            elif isinstance(support, (list, tuple)):
+                                options = [int(opt) for opt in support]
                             else:
-                                options = support
+                                options = [int(support)]
 
                             if not isinstance(options, (list, tuple)):
                                 options = [options]
@@ -644,7 +664,7 @@ class EASOoDaoSync(Sync):
                 elif proposal_type_name == 'OPTIMISTIC':
                     # For OPTIMISTIC type:
                     # Quorum = forVotes + abstainVotes (total votes)
-                    # If quorum not met -> SUCCEDED (optimistic passes by default)
+                    # If quorum not met -> SUCCEEDED (optimistic passes by default)
                     # If quorum met and against votes > threshold -> DEFEATED
                     # Otherwise -> SUCCEEDED
 
@@ -701,7 +721,7 @@ class EASOoDaoSync(Sync):
                     else:
                         # Check if criteria is THRESHOLD
                         criteria = proposal['proposal_type'].get('criteria', None)
-                        thresold = proposal['proposal_type'].get('threshold', 0)
+                        threshold = proposal['proposal_type'].get('threshold', 0)
                         
                         if criteria == 'THRESHOLD':
                             # Any option exceeding threshold -> SUCCEEDED
@@ -713,7 +733,7 @@ class EASOoDaoSync(Sync):
                                     else:
                                         option_votes = int(support_dict)
                                     
-                                    if option_votes > thresold:
+                                    if option_votes > threshold:
                                         succeeded = True
                                         break
                                 except (ValueError, TypeError) as e:
