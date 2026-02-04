@@ -381,6 +381,7 @@ class EASOoDaoSync(Sync):
             try:
                 blob, existing_liveness, existing_proposal_hash, existing_num_of_votes = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
             except SkipProposal as e:
+                print(f"[SKIP_EXISTING] infra={self.infra_dao_slug} proposal_id={proposal_id} reason={e}")
                 skipped_count += 1
                 continue
 
@@ -519,6 +520,7 @@ class EASOoDaoSync(Sync):
             try:
                 proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
             except SkipProposal as e:
+                print(f"[SKIP_UNCHANGED] infra={self.infra_dao_slug} proposal_id={proposal_id} reason={e}")
                 skipped_count += 1
                 continue
 
