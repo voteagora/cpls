@@ -313,34 +313,22 @@ class EASOoDaoSync(Sync):
                     continue
 
             authors_prop_type, approved_prop_type = await self.read_proposal_type(proposal_id)
-            if 'kwargs' in proposal and proposal['kwargs'] is not None:
+            if 'kwargs' in proposal and proposal['kwargs']:
                 orig_kwargs = proposal['kwargs']
+
                 if not isinstance(orig_kwargs, str):
                     print(f"Proposal {proposal_id}: kwargs is not a string: {type(orig_kwargs)}, skipping proposal")
                     skipped_count += 1
                     continue
 
-                if not orig_kwargs:
-                    print(f"Proposal {proposal_id}: Empty kwargs string, skipping proposal")
-                    skipped_count += 1
-                    continue
-
-                # Try parsing as JSON first (handles double quotes), then Python dict literal (handles single quotes)
-                parsed_kwargs = None
                 try:
                     parsed_kwargs = json.loads(orig_kwargs)
                 except json.JSONDecodeError:
-                    try:
-                        parsed_kwargs = ast.literal_eval(orig_kwargs)
-                    except Exception as e:
-                        print(f"Proposal {proposal_id}: Failed to parse kwargs as JSON or Python dict: {e}, skipping proposal")
-                        skipped_count += 1
-                        continue
-
-                if not isinstance(parsed_kwargs, dict):
-                    print(f"Proposal {proposal_id}: kwargs is not a dict: {type(parsed_kwargs)}, skipping proposal")
-                    skipped_count += 1
-                    continue
+                    # Handle special case for standard voting_module with single quotes
+                    if orig_kwargs.strip() in ("{'voting_module': 'standard'}", "{'voting_module' : 'standard'}"):
+                        parsed_kwargs = {'voting_module': 'standard'}
+                    else:
+                        raise Exception(f"Problem decoding kwargs from json literal: {orig_kwargs}")
 
                 proposal['kwargs'] = parsed_kwargs
                 proposal['voting_module'] = parsed_kwargs.get('voting_module')
