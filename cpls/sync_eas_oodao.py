@@ -1,9 +1,11 @@
-import json, time, copy
+import json, time, copy, os
+from urllib.parse import urlparse
+import httpx
 from collections import defaultdict
 
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS, to_eth_address
 from .gcs import GCSClient
-from .config import PROPOSAL_CHECK_SECRET, get_proposal_check_api_url
+from .config import ENVIRONMENT, PROPOSAL_CHECK_SECRET, get_proposal_check_api_url
 
 OODAO = {
     11155111 : {
@@ -218,9 +220,54 @@ class EASOoDaoSync(Sync):
 
     async def validate_proposal(self, proposal_id: str, attester: str, tags: list) -> bool:
         api_url = get_proposal_check_api_url(self.infra_dao_slug)
-        if not api_url or not PROPOSAL_CHECK_SECRET:
+        skip_check = (ENVIRONMENT != 'prod') and (os.getenv("SKIP_PROPOSAL_CHECK", "false").lower() == "true")
+        
+        # Temporarily skip validation for DAOs with broken APIs
+        skip_validation_daos = os.getenv("SKIP_VALIDATION_DAOS", "").split(",")
+        if self.infra_dao_slug in skip_validation_daos:
+            if not getattr(self, "_validate_dao_skip_logged", False):
+                print(f"[VALIDATE_SKIP] infra={self.infra_dao_slug} reason=dao_in_skip_list")
+                self._validate_dao_skip_logged = True
+            return True
+
+        # Track last failure for downstream unqualified logging
+        self._last_validate_failure = None
+
+        if skip_check:
+            if not getattr(self, "_validate_skip_logged", False):
+                print(f"[VALIDATE_SKIP] infra={self.infra_dao_slug} env={ENVIRONMENT} reason=skip_proposal_check")
+                self._validate_skip_logged = True
+            return True
+
+        has_secret = bool(PROPOSAL_CHECK_SECRET)
+        parsed = urlparse(api_url) if api_url else None
+        api_host = parsed.netloc if parsed else ''
+        api_path = parsed.path if parsed else ''
+        debug_body = os.getenv("DEBUG_VALIDATION_LOG_BODY", "false").lower() == "true"
+
+        def log_validate_fail(failure_type: str, status_code=None, reason=None, body_preview=None):
+            self._last_validate_failure = failure_type
+            parts = [
+                "[VALIDATE_FAIL]",
+                f"infra={self.infra_dao_slug}",
+                f"proposal_id={proposal_id}",
+                f"api_host={api_host}",
+                f"api_path={api_path}",
+                f"failure_type={failure_type}",
+            ]
+            if status_code is not None:
+                parts.append(f"status_code={status_code}")
+            if reason:
+                parts.append(f"reason={reason}")
+            if debug_body and body_preview:
+                parts.append(f"body_preview={body_preview}")
+            print(" ".join(parts))
+
+        if not api_url or not has_secret:
+            log_validate_fail("config_missing", reason="missing_url_or_secret")
             return False
 
+        response = None
         try:
             response = await self.http_client.post(
                 api_url,
@@ -234,11 +281,34 @@ class EASOoDaoSync(Sync):
                     "Content-Type": "application/json"
                 }
             )
-            response.raise_for_status()
-            result = response.json()
-            return result.get("success", False)
+
+            if response.status_code < 200 or response.status_code >= 300:
+                body_preview = response.text[:150].replace('\n', ' ') if (response.text and debug_body) else None
+                log_validate_fail("http_non_2xx", status_code=response.status_code, body_preview=body_preview)
+                return False
+
+            try:
+                result = response.json()
+            except ValueError:
+                log_validate_fail("bad_json", status_code=response.status_code)
+                return False
+
+            success = result.get("success", False)
+            if success:
+                return True
+
+            log_validate_fail("success_false", status_code=response.status_code)
+            return False
+
+        except httpx.TimeoutException:
+            log_validate_fail("timeout")
+            return False
+        except httpx.ConnectError:
+            log_validate_fail("connection_error")
+            return False
         except Exception as e:
-            print(f"Error validating proposal {proposal_id} with API: {e}")
+            status_code = response.status_code if response is not None else None
+            log_validate_fail("exception", status_code=status_code, reason=str(e))
             return False
 
 
@@ -297,7 +367,7 @@ class EASOoDaoSync(Sync):
             missing_fields = [f for f in required_fields if not proposal.get(f)]
             
             if missing_fields:
-                print(f"Proposal {proposal_id}: Corrupted attestation data, missing fields: {missing_fields}")
+                print(f"[UNQUALIFIED] infra={self.infra_dao_slug} proposal_id={proposal_id} reason=corrupted_attestation_data missing_fields={missing_fields}")
                 proposal['tags'] = []
                 proposal['validation_failed'] = {
                     "failed_at": int(time.time()),
@@ -311,7 +381,7 @@ class EASOoDaoSync(Sync):
             try:
                 blob, existing_liveness, existing_proposal_hash, existing_num_of_votes = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
             except SkipProposal as e:
-                print(e)
+                print(f"[SKIP_EXISTING] infra={self.infra_dao_slug} proposal_id={proposal_id} reason={e}")
                 skipped_count += 1
                 continue
 
@@ -322,11 +392,14 @@ class EASOoDaoSync(Sync):
             assert isinstance(proposal['tags'], list), "Expected tags to be a list, but got %s" % type(proposal['tags'])
 
             # Check if this proposal has already failed validation before
-            if not has_check_attestation and not proposal_already_saved:
+            # Re-validate unqualified proposals on reset
+            should_validate = not has_check_attestation and (not proposal_already_saved or (existing_liveness == 'unqualified' and self.reset))
+            if should_validate:
                 attester = to_eth_address(proposal_meta['author'])
                 validation_passed = await self.validate_proposal(proposal_id, attester, proposal['tags'])
                 if not validation_passed:
-                    print(f"Proposal {proposal_id}: validation failed, marking as unqualified")
+                    failure_type = getattr(self, "_last_validate_failure", "unknown")
+                    print(f"[UNQUALIFIED] infra={self.infra_dao_slug} proposal_id={proposal_id} reason=validation_failed failure_type={failure_type}")
                     proposal['validation_failed'] = {
                         "failed_at": int(time.time()),
                         "reason": "validation_failed"
@@ -354,6 +427,11 @@ class EASOoDaoSync(Sync):
                 proposal['default_proposal_type_ranges'] = default_type_ranges
 
             proposal_type_name = proposal['proposal_type'].get('class', 'STANDARD')
+            print(f"[PROPOSAL_TYPE] infra={self.infra_dao_slug} proposal_id={proposal_id} class={proposal_type_name} type_name={proposal['proposal_type'].get('name', 'unknown')}")
+            # Normalize non-standard class names (e.g., "tempcheck" -> "STANDARD")
+            if proposal_type_name.upper() not in ('UNSET', 'OPTIMISTIC', 'STANDARD', 'APPROVAL'):
+                print(f"[NORMALIZE_CLASS] infra={self.infra_dao_slug} proposal_id={proposal_id} original_class={proposal_type_name} normalized_to=STANDARD")
+                proposal_type_name = 'STANDARD'
             
             proposal['proposer'] = to_eth_address(proposal_meta['author'])
             try:
@@ -421,9 +499,13 @@ class EASOoDaoSync(Sync):
                     await self.overwrite_votes(votes_out, proposal_id, gcs_client)
 
                 elif proposal_type_name == 'APPROVAL': 
-                    raise NotImplementedError("Approval Types are Not implemented yet.")
+                    print(f"[SKIP_UNSUPPORTED_TYPE] infra={self.infra_dao_slug} proposal_id={proposal_id} proposal_type_name={proposal_type_name}")
+                    skipped_count += 1
+                    continue
                 else:
-                    raise NotImplementedError(f"Proposal Type {proposal_type_name} is not implemented yet.")
+                    print(f"[SKIP_UNSUPPORTED_TYPE] infra={self.infra_dao_slug} proposal_id={proposal_id} proposal_type_name={proposal_type_name}")
+                    skipped_count += 1
+                    continue
 
             proposal['outcome'] = outcome
 
@@ -439,7 +521,7 @@ class EASOoDaoSync(Sync):
             try:
                 proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
             except SkipProposal as e:
-                print(e)
+                print(f"[SKIP_UNCHANGED] infra={self.infra_dao_slug} proposal_id={proposal_id} reason={e}")
                 skipped_count += 1
                 continue
 
