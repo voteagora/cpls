@@ -28,7 +28,7 @@ PROPOSAL_CHECK_API_URL = os.getenv("PROPOSAL_CHECK_API_URL", "")
 PROPOSAL_CHECK_SECRET = os.getenv("PROPOSAL_CHECK_SECRET", "")
 
 PROPOSAL_CHECK_PREFIXES = {
-    "syndicate": "https://agora-next-syndicate-git-aarna-tax-forms-cta-voteagora.vercel.app/",
+    "syndicate": "https://agora-next-syndicate-git-aarna-15-day-timer-ta-062d0d-voteagora.vercel.app/",
     "towns": "https://www.townslodge.com/",
 }
 
