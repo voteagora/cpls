@@ -427,6 +427,7 @@ class EASOoDaoSync(Sync):
                 proposal['default_proposal_type_ranges'] = default_type_ranges
 
             proposal_type_name = proposal['proposal_type'].get('class', 'STANDARD')
+            print(f"[PROPOSAL_TYPE] infra={self.infra_dao_slug} proposal_id={proposal_id} class={proposal_type_name} type_name={proposal['proposal_type'].get('name', 'unknown')}")
             # Normalize non-standard class names (e.g., "tempcheck" -> "STANDARD")
             if proposal_type_name.upper() not in ('UNSET', 'OPTIMISTIC', 'STANDARD', 'APPROVAL'):
                 print(f"[NORMALIZE_CLASS] infra={self.infra_dao_slug} proposal_id={proposal_id} original_class={proposal_type_name} normalized_to=STANDARD")
