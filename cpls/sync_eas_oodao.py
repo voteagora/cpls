@@ -383,7 +383,9 @@ class EASOoDaoSync(Sync):
             assert isinstance(proposal['tags'], list), "Expected tags to be a list, but got %s" % type(proposal['tags'])
 
             # Check if this proposal has already failed validation before
-            if not has_check_attestation and not proposal_already_saved:
+            # Re-validate unqualified proposals on reset
+            should_validate = not has_check_attestation and (not proposal_already_saved or (existing_liveness == 'unqualified' and self.reset))
+            if should_validate:
                 attester = to_eth_address(proposal_meta['author'])
                 validation_passed = await self.validate_proposal(proposal_id, attester, proposal['tags'])
                 if not validation_passed:
