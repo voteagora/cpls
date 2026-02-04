@@ -221,6 +221,14 @@ class EASOoDaoSync(Sync):
     async def validate_proposal(self, proposal_id: str, attester: str, tags: list) -> bool:
         api_url = get_proposal_check_api_url(self.infra_dao_slug)
         skip_check = (ENVIRONMENT != 'prod') and (os.getenv("SKIP_PROPOSAL_CHECK", "false").lower() == "true")
+        
+        # Temporarily skip validation for DAOs with broken APIs
+        skip_validation_daos = os.getenv("SKIP_VALIDATION_DAOS", "").split(",")
+        if self.infra_dao_slug in skip_validation_daos:
+            if not getattr(self, "_validate_dao_skip_logged", False):
+                print(f"[VALIDATE_SKIP] infra={self.infra_dao_slug} reason=dao_in_skip_list")
+                self._validate_dao_skip_logged = True
+            return True
 
         # Track last failure for downstream unqualified logging
         self._last_validate_failure = None
