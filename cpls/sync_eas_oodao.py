@@ -418,6 +418,10 @@ class EASOoDaoSync(Sync):
                 proposal['default_proposal_type_ranges'] = default_type_ranges
 
             proposal_type_name = proposal['proposal_type'].get('class', 'STANDARD')
+            # Normalize non-standard class names (e.g., "tempcheck" -> "STANDARD")
+            if proposal_type_name.upper() not in ('UNSET', 'OPTIMISTIC', 'STANDARD', 'APPROVAL'):
+                print(f"[NORMALIZE_CLASS] infra={self.infra_dao_slug} proposal_id={proposal_id} original_class={proposal_type_name} normalized_to=STANDARD")
+                proposal_type_name = 'STANDARD'
             
             proposal['proposer'] = to_eth_address(proposal_meta['author'])
             try:
