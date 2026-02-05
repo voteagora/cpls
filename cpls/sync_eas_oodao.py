@@ -1,4 +1,4 @@
-import json, time, copy
+import json, time, copy, ast
 from collections import defaultdict
 
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS, to_eth_address
@@ -195,6 +195,7 @@ class EASOoDaoSync(Sync):
                                                 decoded_attestation->>'title' as title,
                                                 decoded_attestation->'startts' as startts,
                                                 decoded_attestation->>'description' as description,
+                                                decoded_attestation->>'kwargs' as kwargs,
                                                 data as proposal_id,
                                                 block_number as created_block_number,
                                                 attestation_time as created_time
@@ -287,7 +288,6 @@ class EASOoDaoSync(Sync):
             proposal = dict(proposal_meta)
 
             proposal_id = proposal_meta['proposal_id']
-
             if proposal['uid'] in deletions:
                 proposal['delete_event'] = deletions[proposal['uid']]
 
@@ -337,7 +337,27 @@ class EASOoDaoSync(Sync):
                     continue
 
             authors_prop_type, approved_prop_type = await self.read_proposal_type(proposal_id)
+            if 'kwargs' in proposal and proposal['kwargs']:
+                orig_kwargs = proposal['kwargs']
 
+                if not isinstance(orig_kwargs, str):
+                    print(f"Proposal {proposal_id}: kwargs is not a string: {type(orig_kwargs)}, skipping proposal")
+                    skipped_count += 1
+                    continue
+
+                try:
+                    parsed_kwargs = json.loads(orig_kwargs)
+                except json.JSONDecodeError:
+                    # Handle special case for standard voting_module with single quotes
+                    if orig_kwargs.strip() in ("{'voting_module': 'standard'}", "{'voting_module' : 'standard'}"):
+                        parsed_kwargs = {'voting_module': 'standard'}
+                    else:
+                        raise Exception(f"Problem decoding kwargs from json literal: {orig_kwargs}")
+
+                proposal['kwargs'] = parsed_kwargs
+                proposal['voting_module'] = parsed_kwargs.get('voting_module')
+                if 'voting_module' in proposal['kwargs']:
+                    del proposal['kwargs']['voting_module']
             if approved_prop_type:
                 proposal['proposal_type'] = approved_prop_type
                 proposal['proposal_type_approval'] = 'APPROVED'
@@ -353,14 +373,19 @@ class EASOoDaoSync(Sync):
                 proposal['proposal_type_approval'] = 'ERROR'
                 proposal['default_proposal_type_ranges'] = default_type_ranges
 
-            proposal_type_name = proposal['proposal_type'].get('class', 'STANDARD')
+            voting_module = proposal.get('voting_module')
+            if isinstance(voting_module, str) and voting_module.lower() in ('standard', 'optimistic', 'approval'):
+                proposal_type_name = voting_module.upper()
+            elif 'proposal_type' in proposal and isinstance(proposal['proposal_type'], dict):
+                proposal_type_name = proposal['proposal_type'].get('class', 'STANDARD')
+            else:
+                proposal_type_name = 'STANDARD'
             
             proposal['proposer'] = to_eth_address(proposal_meta['author'])
             try:
                 proposal['proposer_ens'] = await self.bc.get_ens_lru(proposal['proposer'])
             except:
-                pass
-            proposal['proposer_ens'] = None
+                proposal['proposer_ens'] = None
             del proposal['author']            
 
             votes = await self.read_votes_from_db(proposal_id)
@@ -421,7 +446,76 @@ class EASOoDaoSync(Sync):
                     await self.overwrite_votes(votes_out, proposal_id, gcs_client)
 
                 elif proposal_type_name == 'APPROVAL': 
-                    raise NotImplementedError("Approval Types are Not implemented yet.")
+
+                    outcome = {
+                        'token-holders': defaultdict(lambda: defaultdict(int)),
+                        'no-param': defaultdict(int)
+                    }
+
+                    votes_out = []
+                    voter_set = []
+
+                    for vote in votes:
+
+                        copy_of_vote = copy.deepcopy(dict(vote))
+                        copy_of_vote['weight'] = str(int(vote['weight']))
+
+                        voter_set.append(copy_of_vote['voter'])
+                        addr = vote['voter'].lower()
+
+                        try:
+                            copy_of_vote['ens'] = await self.bc.get_ens_lru(addr)
+                        except:
+                            pass
+
+                        delegate_meta = self.delegate_metadata.get(addr, {})
+                        copy_of_vote.update(delegate_meta)
+
+                        support = vote['support']
+                        weight = int(vote['weight'])
+
+                        try:
+                            if isinstance(support, str):
+                                if ',' in support:
+                                    options = [int(x.strip()) for x in support.split(',')]
+                                else:
+                                    try:
+                                        options = json.loads(support)
+                                    except json.JSONDecodeError:
+                                        options = [int(support)]
+                            elif isinstance(support, (list, tuple)):
+                                options = [int(opt) for opt in support]
+                            else:
+                                options = [int(support)]
+
+                            if not isinstance(options, (list, tuple)):
+                                options = [options]
+
+                            for option in options:
+                                outcome['token-holders'][str(option)][1] += weight
+
+                            outcome['no-param'][1] += weight
+
+                            copy_of_vote['params'] = options
+                            copy_of_vote['support'] = "1"
+                        except (TypeError, KeyError, ValueError) as e:
+                            print(f"Warning: Failed to process vote for {copy_of_vote.get('voter', 'unknown')}: {e}")
+                            print(f"Support value: {support}, type: {type(support)}")
+                            copy_of_vote['params'] = []
+                            copy_of_vote['support'] = "1"
+
+                        votes_out.append(copy_of_vote)
+
+                    voter_set = set(voter_set)
+
+                    for option_key in outcome['token-holders'].keys():
+                        for support_key in outcome['token-holders'][option_key].keys():
+                            outcome['token-holders'][option_key][support_key] = str(outcome['token-holders'][option_key][support_key])
+
+                    for support_key in outcome['no-param'].keys():
+                        outcome['no-param'][support_key] = str(outcome['no-param'][support_key])
+
+                    await self.overwrite_votes(votes_out, proposal_id, gcs_client)
                 else:
                     raise NotImplementedError(f"Proposal Type {proposal_type_name} is not implemented yet.")
 
@@ -500,27 +594,63 @@ class EASOoDaoSync(Sync):
                     snapshot_vp_lookup = {row['addr'].lower(): row for row in snapshot_vp}
 
                     votes_out_updated = []
-                    outcome_updated = defaultdict(lambda: defaultdict(int))
 
-                    for vote in votes_out:
-                        addr = vote['voter'].lower()
-                        vp_entry = snapshot_vp_lookup.get(addr)
+                    if proposal_type_name == 'APPROVAL':
+                        outcome_updated = {
+                            'token-holders': defaultdict(lambda: defaultdict(int)),
+                            'no-param': defaultdict(int)
+                        }
 
-                        if vp_entry:
-                            # Update vote weight with actual VP (delegation + nonivotes)
-                            vote['weight'] = vp_entry['vp']
-                            vote_weight = int(vp_entry['vp'])
-                        else:
-                            # Keep original weight if not in snapshot
-                            vote_weight = int(vote['weight'])
+                        for vote in votes_out:
+                            addr = vote['voter'].lower()
+                            vp_entry = snapshot_vp_lookup.get(addr)
 
-                        # Recalculate outcome with correct VP
-                        outcome_updated['token-holders'][int(vote.get('support', 0))] += vote_weight
-                        votes_out_updated.append(vote)
+                            if vp_entry:
+                                # Update vote weight with actual VP (delegation + nonivotes)
+                                vote['weight'] = vp_entry['vp']
+                                vote_weight = int(vp_entry['vp'])
+                            else:
+                                # Keep original weight if not in snapshot
+                                vote_weight = int(vote['weight'])
 
-                    # Update outcome with recalculated values
-                    for key in outcome_updated['token-holders'].keys():
-                        outcome['token-holders'][str(key)] = str(outcome_updated['token-holders'][key])
+                            # Recalculate outcome with correct VP for APPROVAL proposals
+                            params = vote.get('params', [])
+                            if params:
+                                for option in params:
+                                    outcome_updated['token-holders'][str(option)][1] += vote_weight
+                                outcome_updated['no-param'][1] += vote_weight
+
+                            votes_out_updated.append(vote)
+
+                        # Update outcome with recalculated values
+                        for option_key in outcome_updated['token-holders'].keys():
+                            for support_key in outcome_updated['token-holders'][option_key].keys():
+                                outcome['token-holders'][option_key][support_key] = str(outcome_updated['token-holders'][option_key][support_key])
+
+                        for support_key in outcome_updated['no-param'].keys():
+                            outcome['no-param'][support_key] = str(outcome_updated['no-param'][support_key])
+                    else:
+                        outcome_updated = defaultdict(lambda: defaultdict(int))
+
+                        for vote in votes_out:
+                            addr = vote['voter'].lower()
+                            vp_entry = snapshot_vp_lookup.get(addr)
+
+                            if vp_entry:
+                                # Update vote weight with actual VP (delegation + nonivotes)
+                                vote['weight'] = vp_entry['vp']
+                                vote_weight = int(vp_entry['vp'])
+                            else:
+                                # Keep original weight if not in snapshot
+                                vote_weight = int(vote['weight'])
+
+                            # Recalculate outcome with correct VP for STANDARD/OPTIMISTIC proposals
+                            outcome_updated['token-holders'][int(vote.get('support', 0))] += vote_weight
+                            votes_out_updated.append(vote)
+
+                        # Update outcome with recalculated values
+                        for key in outcome_updated['token-holders'].keys():
+                            outcome['token-holders'][str(key)] = str(outcome_updated['token-holders'][key])
 
                     # Overwrite votes with VP-enriched data
                     await self.overwrite_votes(votes_out_updated, proposal_id, gcs_client)
@@ -549,8 +679,11 @@ class EASOoDaoSync(Sync):
 
                     await self.overwrite_hasnt_voted(snapshot_vp_out, proposal_id, gcs_client)
             
+            # Handle lifecycle states in priority order
+            # CANCELLED takes precedence over all other states
             if 'delete_event' in proposal:
                 proposal['lifecycle_stage'] = 'CANCELLED'
+            # Time-based states
             elif curts < startts:
                 proposal['lifecycle_stage'] = 'PENDING'
             elif startts <= curts < endts:
@@ -560,13 +693,94 @@ class EASOoDaoSync(Sync):
                 if proposal_type_name == 'UNSET':
                     proposal['lifecycle_stage'] = 'EXPIRED'
                     liveness = 'archived'
+                elif proposal_type_name == 'OPTIMISTIC':
+                    # For OPTIMISTIC type:
+                    # Quorum = forVotes + abstainVotes (total votes)
+                    # If quorum not met -> SUCCEEDED (optimistic passes by default)
+                    # If quorum met and against votes > threshold -> DEFEATED
+                    # Otherwise -> SUCCEEDED
+
+                    outcome_data = proposal['outcome']['token-holders']
+
+                    for_votes = int(outcome_data.get('1', 0))
+                    against_votes = int(outcome_data.get('0', 0))
+                    abstain_votes = int(outcome_data.get('2', 0))
+                    total_votes = for_votes + against_votes + abstain_votes
+                    passing_quorum = (proposal['proposal_type']['quorum'] / 10000) * int(proposal['total_voting_power_at_start'])
+                    quorum_check = total_votes >= passing_quorum
+                    proposal['quorum_check'] = quorum_check
+
+                    if not quorum_check:
+                        # Optimistic proposals pass if quorum not met
+                        proposal['lifecycle_stage'] = 'SUCCEEDED'
+                    else:
+                        # Check if against votes exceed threshold
+                        threshold = proposal['proposal_type'].get('threshold', 0)
+                        threshold_value = (threshold / 10000) * int(proposal['total_voting_power_at_start'])
+                        
+                        if against_votes > threshold_value:
+                            proposal['lifecycle_stage'] = 'DEFEATED'
+                        else:
+                            proposal['lifecycle_stage'] = 'SUCCEEDED'
+                elif proposal_type_name == 'APPROVAL':
+                    # For APPROVAL type:
+                    # Quorum = forVotes + abstainVotes (total votes)
+                    # If quorum not met -> DEFEATED
+                    # If criteria == THRESHOLD: any option > criteriaValue -> SUCCEEDED, else DEFEATED
+                    # Otherwise -> SUCCEEDED
+
+                    outcome_data = proposal['outcome']['token-holders']
+
+                    # Sum all votes across options (for + abstain = total)
+                    total_votes = 0
+                    for option_key, support_dict in outcome_data.items():
+                        try:
+                            if isinstance(support_dict, dict):
+                                for support_val in support_dict.values():
+                                    total_votes += int(support_val)
+                            else:
+                                total_votes += int(support_dict)
+                        except (ValueError, TypeError) as e:
+                            print(f"Warning: Failed to process votes for option {option_key}: {e}")
+                            print(f"Support dict value: {support_dict}, type: {type(support_dict)}")
+
+                    passing_quorum = (proposal['proposal_type']['quorum'] / 10000) * int(proposal['total_voting_power_at_start'])
+                    quorum_check = total_votes >= passing_quorum
+                    proposal['quorum_check'] = quorum_check
+
+                    if not quorum_check:
+                        proposal['lifecycle_stage'] = 'DEFEATED'
+                    else:
+                        # Check if criteria is THRESHOLD
+                        criteria = proposal['proposal_type'].get('criteria', None)
+                        threshold = proposal['proposal_type'].get('threshold', 0)
+                        
+                        if criteria == 'THRESHOLD':
+                            # Any option exceeding threshold -> SUCCEEDED
+                            succeeded = False
+                            for option_key, support_dict in outcome_data.items():
+                                try:
+                                    if isinstance(support_dict, dict):
+                                        option_votes = sum(int(v) for v in support_dict.values())
+                                    else:
+                                        option_votes = int(support_dict)
+                                    
+                                    if option_votes > threshold:
+                                        succeeded = True
+                                        break
+                                except (ValueError, TypeError) as e:
+                                    print(f"Warning: Failed to process threshold check for option {option_key}: {e}")
+                                    print(f"Support dict value: {support_dict}, type: {type(support_dict)}")
+                            proposal['lifecycle_stage'] = 'SUCCEEDED' if succeeded else 'DEFEATED'
+                        else:
+                            proposal['lifecycle_stage'] = 'SUCCEEDED'
                 else:
 
                     # TODO - Count Abstain?
 
                     passing_quorum = (proposal['proposal_type']['quorum'] / 10000) * int(proposal['total_voting_power_at_start'])
                     passing_approval_threshold = (proposal['proposal_type']['approval_threshold'] / 10000) * int(proposal['total_voting_power_at_start'])
-                    
+
                     quorum_check = sum([int(weight) for weight in proposal['outcome']['token-holders'].values()]) >= passing_quorum
                     approval_check = int(proposal['outcome']['token-holders'].get('1', 0)) >= passing_approval_threshold
 

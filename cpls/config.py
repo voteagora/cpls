@@ -15,7 +15,7 @@ SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
 SERVER_PORT = int(os.getenv("SERVER_PORT", "8001"))
 SCHEDULER_INTERVAL_MINUTES = int(os.getenv("SCHEDULER_INTERVAL_MINUTES", "10"))
 ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY", '')
-BLOCKCACHE_URL = os.getenv("BLOCKCACHE_URL", 'https://blockcache-production.up.railway.app/')
+BLOCKCACHE_URL = os.getenv("BLOCKCACHE_URL", 'https://blockcache-production.up.railway.app')
 DATABASE_URL = os.getenv("DATABASE_URL")
 print(DATABASE_URL)
 WRITE_TO_DISK = ENVIRONMENT == 'dev'
@@ -27,13 +27,21 @@ RESET_PROPOSALS_ON_RESTART = os.getenv("RESET_PROPOSALS_ON_RESTART", "true").low
 PROPOSAL_CHECK_API_URL = os.getenv("PROPOSAL_CHECK_API_URL", "")
 PROPOSAL_CHECK_SECRET = os.getenv("PROPOSAL_CHECK_SECRET", "")
 
-PROPOSAL_CHECK_PREFIXES = {
-    "syndicate": "https://www.syndicatecollective.org/",
-    "towns": "https://www.townslodge.com/",
+PROPOSAL_CHECK_PREFIXES_PROD = {
+  "syndicate": "https://www.syndicatecollective.org/",
+  "towns": "https://www.townslodge.com/",
+}
+
+PROPOSAL_CHECK_PREFIXES_DEV = {
+  "syndicate": "https://agora-next-syndicate-git-feat-proposalcheckpr-voteagora.vercel.app/",
+  "towns": "https://agora-next-towns-git-feat-proposalcheckpr-voteagora.vercel.app/",
 }
 
 def get_proposal_check_api_url(dao_slug: str) -> str:
-    prefix = PROPOSAL_CHECK_PREFIXES.get(dao_slug, "")
+    if ENVIRONMENT == 'dev':
+        prefix = PROPOSAL_CHECK_PREFIXES_DEV.get(dao_slug, "")
+    else:
+        prefix = PROPOSAL_CHECK_PREFIXES_PROD.get(dao_slug, "")
     if not prefix or not PROPOSAL_CHECK_API_URL:
         return ""
     return f"{prefix.rstrip('/')}{PROPOSAL_CHECK_API_URL}"
