@@ -744,7 +744,7 @@ class EASOoDaoSync(Sync):
                     proposal['approval_check'] = approval_check
 
                     if quorum_check and approval_check:
-                        proposal['lifecycle_stage'] = 'SUCCEEDED'
+                        proposal['lifecycle_stage'] = 'PASSED'
                         
                     else:
                         proposal['lifecycle_stage'] = 'DEFEATED'
