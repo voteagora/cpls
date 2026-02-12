@@ -93,11 +93,14 @@ class EASOoDaoSync(Sync):
     #         rows = await connection.fetch(qry)
     #         return rows
 
-    async def read_proposal_type_range(self):
+    async def read_proposal_type_range(self, module=None):
 
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            row = await connection.fetchrow(f"""select min(quorum::numeric)::text min_quorum_pct, max(quorum::numeric)::text max_quorum_pct, min(approval_threshold::numeric)::text min_approval_threshold_pct, max(approval_threshold::numeric)::text max_approval_threshold_pct from {self.infra_dao_slug}.proposal_types where contract = '{self.oodao_dao_id}';""")
+            where_clause = f"contract = '{self.oodao_dao_id}'"
+            if module:
+                where_clause += f" AND module = '{module}'"
+            row = await connection.fetchrow(f"""select min(quorum::numeric)::text min_quorum_pct, max(quorum::numeric)::text max_quorum_pct, min(approval_threshold::numeric)::text min_approval_threshold_pct, max(approval_threshold::numeric)::text max_approval_threshold_pct from {self.infra_dao_slug}.proposal_types where {where_clause};""")
             return row
         
     async def read_snapshot_votable_supply(self, block_number, chain_id):
@@ -276,8 +279,7 @@ class EASOoDaoSync(Sync):
         deletions = {row['ref_uid'] : dict(row) for row in deletions}
         checks = {row['proposal_id'] : dict(row) for row in checks}
 
-        default_type_ranges = await self.read_proposal_type_range()
-        default_type_ranges = {k : int(v) for k, v in default_type_ranges.items() if v is not None}
+        default_type_ranges_cache = {}
 
         anything_changed = False
         skipped_count = 0
@@ -320,6 +322,14 @@ class EASOoDaoSync(Sync):
 
             proposal['tags'] = proposal['tags'].split(',')
             assert isinstance(proposal['tags'], list), "Expected tags to be a list, but got %s" % type(proposal['tags'])
+
+            module = 'gov-proposal' if 'gov-proposal' in proposal['tags'] else 'tempcheck'
+            
+            if module not in default_type_ranges_cache:
+                default_type_ranges_raw = await self.read_proposal_type_range(module)
+                default_type_ranges_cache[module] = {k : int(v) for k, v in default_type_ranges_raw.items() if v is not None}
+            
+            default_type_ranges = default_type_ranges_cache[module]
 
             # Check if this proposal has already failed validation before
             if not has_check_attestation and not proposal_already_saved:
@@ -374,12 +384,7 @@ class EASOoDaoSync(Sync):
                 proposal['default_proposal_type_ranges'] = default_type_ranges
 
             voting_module = proposal.get('voting_module')
-            if isinstance(voting_module, str) and voting_module.lower() in ('standard', 'optimistic', 'approval'):
-                proposal_type_name = voting_module.upper()
-            elif 'proposal_type' in proposal and isinstance(proposal['proposal_type'], dict):
-                proposal_type_name = proposal['proposal_type'].get('class', 'STANDARD')
-            else:
-                proposal_type_name = 'STANDARD'
+            proposal_type_name = voting_module.upper() if isinstance(voting_module, str) and voting_module.lower() in ('standard', 'optimistic', 'approval') else 'STANDARD'
             
             proposal['proposer'] = to_eth_address(proposal_meta['author'])
             try:
