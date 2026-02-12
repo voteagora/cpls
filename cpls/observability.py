@@ -9,6 +9,7 @@ import logging
 import json
 import os
 import urllib.request
+import urllib.error
 from typing import Dict, Optional, List
 from datetime import datetime
 from time import time
@@ -18,9 +19,29 @@ from .config import ENVIRONMENT
 # Logging initialization flag
 _logging_initialized = False
 
+# Rate limiting for metric error logs (once per 60 seconds)
+_last_metric_error_log_ts = 0
+
+
+def _log_metric_error_once_per_minute(details: Dict):
+    """Log metric submission error at most once per 60 seconds. Rate-limited to prevent log flooding."""
+    global _last_metric_error_log_ts
+    
+    current_time = time()
+    if current_time - _last_metric_error_log_ts < 60:
+        return
+    
+    _last_metric_error_log_ts = current_time
+    
+    logger = get_logger("cpls.metrics")
+    logger.error("Datadog metric submission failed", extra={
+        "extra_fields": details
+    })
+
 
 def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: float, metric_type: str, tags: List[str]):
-    """Send a single metric via Datadog HTTP API v2. Fire-and-forget, never raises exceptions."""
+    """Send a single metric via Datadog HTTP API v1. Fire-and-forget, never raises exceptions."""
+    url = None
     try:
         # Map histogram to gauge (can upgrade to distribution metrics later)
         api_metric_type = "gauge" if metric_type == "histogram" else metric_type
@@ -28,7 +49,7 @@ def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: f
         # Current Unix timestamp in seconds
         timestamp = int(time())
         
-        # Build payload according to Datadog v2 series API
+        # Build payload according to Datadog v1 series API
         payload = {
             "series": [{
                 "metric": metric_name,
@@ -53,9 +74,32 @@ def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: f
         
         # Send with short timeout (2 seconds) to avoid blocking
         urllib.request.urlopen(req, timeout=2)
-    except Exception:
-        # Silently swallow all errors - metrics should never break the app
-        pass
+    except urllib.error.HTTPError as e:
+        # HTTP error with status code and response body
+        response_body = ""
+        try:
+            response_body = e.read().decode('utf-8', errors='replace')[:500]
+        except Exception:
+            pass
+        
+        _log_metric_error_once_per_minute({
+            "dd_endpoint": url or "unknown",
+            "status_code": e.code,
+            "response_body": response_body,
+            "error": str(e)
+        })
+    except urllib.error.URLError as e:
+        # URL error (connection, timeout, etc.)
+        _log_metric_error_once_per_minute({
+            "dd_endpoint": url or "unknown",
+            "error": str(e)
+        })
+    except Exception as e:
+        # Any other exception
+        _log_metric_error_once_per_minute({
+            "dd_endpoint": url or "unknown",
+            "error": str(e)
+        })
 
 
 def emit_job_metric(name: str, value: float, tags: Optional[Dict[str, str]] = None, metric_type: str = "count"):
