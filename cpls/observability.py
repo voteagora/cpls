@@ -23,10 +23,34 @@ _logging_initialized = False
 _last_http_error_ts = 0
 
 
-def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: float, metric_type: str, tags: List[str]):
-    """Send a single metric via Datadog HTTP API v2. Fire-and-forget, never raises exceptions."""
+def _log_metric_error_once(metric_name: str, url: str, exception: Exception, status_code: Optional[int] = None, response_body: str = ""):
+    """Log metric submission error at most once per 60 seconds. Rate-limited to prevent log flooding."""
     global _last_http_error_ts
     
+    current_time = time()
+    if current_time - _last_http_error_ts < 60:
+        return
+    
+    _last_http_error_ts = current_time
+    
+    logger = get_logger("cpls.metrics")
+    extra_fields = {
+        "endpoint": url or "unknown",
+        "env": ENVIRONMENT,
+        "metric_name": metric_name,
+        "exception_class": type(exception).__name__,
+        "error": str(exception)
+    }
+    if status_code is not None:
+        extra_fields["status_code"] = status_code
+    if response_body:
+        extra_fields["response_body"] = response_body
+    
+    logger.warning("Datadog metric submission failed", extra={"extra_fields": extra_fields})
+
+
+def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: float, metric_type: str, tags: List[str]):
+    """Send a single metric via Datadog HTTP API v2. Fire-and-forget, never raises exceptions."""
     url = None
     try:
         # Map metric_type to Datadog v2 type enum (int)
@@ -67,10 +91,7 @@ def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: f
         )
         
         # Send with short timeout (2 seconds) to avoid blocking
-        response = urllib.request.urlopen(req, timeout=2)
-        # Temporary: log success to verify metrics are being sent
-        if response.getcode() == 202:
-            print("DD_METRIC_SUCCESS", json.dumps({"metric": metric_name, "status": 202}))
+        urllib.request.urlopen(req, timeout=2)
     except urllib.error.HTTPError as e:
         # HTTP error with status code and response body
         body = ""
@@ -79,38 +100,10 @@ def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: f
         except Exception:
             pass
         
-        # Rate-limited WARNING log (at most once per 60 seconds)
-        current_time = time()
-        if current_time - _last_http_error_ts >= 60:
-            _last_http_error_ts = current_time
-            logger = get_logger("cpls.metrics")
-            logger.warning("Datadog metric submission failed", extra={
-                "extra_fields": {
-                    "endpoint": url or "unknown",
-                    "env": ENVIRONMENT,
-                    "metric_name": metric_name,
-                    "exception_class": type(e).__name__,
-                    "error": str(e),
-                    "status_code": e.code,
-                    "response_body": body
-                }
-            })
+        _log_metric_error_once(metric_name, url, e, status_code=e.code, response_body=body)
     except Exception as e:
         # Any other exception
-        # Rate-limited WARNING log (at most once per 60 seconds)
-        current_time = time()
-        if current_time - _last_http_error_ts >= 60:
-            _last_http_error_ts = current_time
-            logger = get_logger("cpls.metrics")
-            logger.warning("Datadog metric submission failed", extra={
-                "extra_fields": {
-                    "endpoint": url or "unknown",
-                    "env": ENVIRONMENT,
-                    "metric_name": metric_name,
-                    "exception_class": type(e).__name__,
-                    "error": str(e)
-                }
-            })
+        _log_metric_error_once(metric_name, url, e)
 
 
 def emit_job_metric(name: str, value: float, tags: Optional[Dict[str, str]] = None, metric_type: str = "count"):
@@ -126,13 +119,9 @@ def emit_job_metric(name: str, value: float, tags: Optional[Dict[str, str]] = No
     This function never raises exceptions and silently fails if Datadog is unavailable.
     Requires DD_API_KEY environment variable to be set. If missing, no-op.
     """
-    print("DD_METRIC_CALLED", json.dumps({"name": name, "env": ENVIRONMENT}))
-    
     try:
         # Read API key at call time (not import time)
         api_key = os.getenv("DD_API_KEY", "")
-        
-        print("DD_METRIC_KEY_PRESENT", json.dumps({"present": bool(api_key)}))
         
         # Skip if API key not configured (safe no-op)
         if not api_key:
