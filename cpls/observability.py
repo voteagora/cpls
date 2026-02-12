@@ -76,25 +76,17 @@ def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: f
         # HTTP error with status code and response body
         body = ""
         try:
-            body = e.read().decode("utf-8", errors="replace")[:500]
+            body = e.read().decode("utf-8", errors="replace")[:300]
         except Exception:
             pass
         
-        _log_metric_error_once_per_minute("HTTPERROR", {
-            "url": url or "unknown",
+        _log_metric_error_once_per_minute("HTTP_ERROR", {
             "status": e.code,
             "body": body
-        })
-    except urllib.error.URLError as e:
-        # URL error (connection, timeout, etc.)
-        _log_metric_error_once_per_minute("URLERROR", {
-            "url": url or "unknown",
-            "error": str(e)
         })
     except Exception as e:
         # Any other exception
         _log_metric_error_once_per_minute("EXCEPTION", {
-            "url": url or "unknown",
             "error": str(e)
         })
 
