@@ -109,7 +109,7 @@ class JobQueue:
                 "job_type": job_type
             }, metric_type="gauge")
             
-            logger.info("Job queued", extra={
+            logger.debug("Job queued", extra={
                 "extra_fields": {
                     "job_id": job_id,
                     "infra_dao_slug": infra_dao_slug,
@@ -167,7 +167,7 @@ class JobQueue:
                 
                 try:
                     async with dao_lock:
-                        logger.info("Worker processing job (LOCK ACQUIRED)", extra={
+                        logger.debug("Worker processing job (LOCK ACQUIRED)", extra={
                             "extra_fields": {
                                 "worker_id": worker_id,
                                 "job_id": job.id,
@@ -279,7 +279,7 @@ class JobQueue:
                     self.queue.task_done()
 
             except asyncio.CancelledError:
-                logger.info("Worker cancelled", extra={
+                logger.debug("Worker cancelled", extra={
                     "extra_fields": {"worker_id": worker_id}
                 })
                 break
@@ -292,7 +292,7 @@ class JobQueue:
                     }
                 })
 
-        logger.info("Worker stopped", extra={
+        logger.debug("Worker stopped", extra={
             "extra_fields": {"worker_id": worker_id}
         })
 
@@ -310,7 +310,7 @@ class JobQueue:
 
         # Signal all workers to start consuming
         self.workers_ready.set()
-        logger.info("Started concurrent workers", extra={
+        logger.debug("Started concurrent workers", extra={
             "extra_fields": {"num_workers": self.num_workers}
         })
 
@@ -318,7 +318,7 @@ class JobQueue:
         try:
             await asyncio.gather(*self.worker_tasks)
         except asyncio.CancelledError:
-            logger.info("Job processing cancelled")
+            logger.debug("Job processing cancelled")
 
     async def _execute_job(self, job: Job):
         """Execute the actual job logic"""
@@ -374,15 +374,6 @@ class JobQueue:
             'total_refreshed': total_refreshed,
             'by_source': stats_by_source
         }
-
-        logger.info("Job execution completed", extra={
-            "extra_fields": {
-                "job_id": job.id,
-                "infra_dao_slug": job.payload.get('infra_dao_slug'),
-                "total_refreshed": total_refreshed,
-                "total_skipped": total_skipped
-            }
-        })
 
     def get_all_jobs(self) -> 'List[Job]':
         """Get all jobs sorted by creation time"""
