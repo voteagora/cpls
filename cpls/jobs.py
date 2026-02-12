@@ -55,6 +55,8 @@ class JobQueue:
         self.dao_locks: Dict[str, asyncio.Lock] = {}
         self.worker_tasks: List[asyncio.Task] = []
         self.workers_ready = asyncio.Event()
+        # Track last successful job run timestamp per DAO
+        self.last_success_timestamp: Dict[str, int] = {}
 
         self.http_client = create_http_client()
 
@@ -86,6 +88,14 @@ class JobQueue:
                 "infra_dao_slug": infra_dao_slug,
                 "job_type": job_type
             })
+            
+            # Emit seconds_since_last_success if we have a stored timestamp
+            if infra_dao_slug in self.last_success_timestamp:
+                seconds_since = int(time.time()) - self.last_success_timestamp[infra_dao_slug]
+                emit_job_metric("seconds_since_last_success", seconds_since, {
+                    "infra_dao_slug": infra_dao_slug,
+                    "job_type": job_type
+                }, metric_type="gauge")
             
             logger.warning("Job skipped due to lock", extra={
                 "extra_fields": {
@@ -195,17 +205,25 @@ class JobQueue:
                             
                             # Calculate duration
                             duration = time.time() - start_time
+                            current_timestamp = int(time.time())
                             
-                            # Emit completed metric, duration histogram, and last_success_timestamp gauge
+                            # Store last success timestamp for this DAO
+                            self.last_success_timestamp[dao_slug] = current_timestamp
+                            
+                            # Emit success metrics
                             emit_job_metric("completed", 1, {
                                 "infra_dao_slug": dao_slug,
                                 "job_type": job.type
                             })
-                            emit_job_metric("duration", duration, {
+                            emit_job_metric("duration_seconds", duration, {
                                 "infra_dao_slug": dao_slug,
                                 "job_type": job.type
                             }, metric_type="histogram")
-                            emit_job_metric("last_success_timestamp", datetime.utcnow().timestamp(), {
+                            emit_job_metric("last_success_timestamp", current_timestamp, {
+                                "infra_dao_slug": dao_slug,
+                                "job_type": job.type
+                            }, metric_type="gauge")
+                            emit_job_metric("seconds_since_last_success", 0, {
                                 "infra_dao_slug": dao_slug,
                                 "job_type": job.type
                             }, metric_type="gauge")
@@ -231,15 +249,11 @@ class JobQueue:
                             # Calculate duration even on failure
                             duration = time.time() - start_time
                             
-                            # Emit failed metric and duration histogram
+                            # Emit failed metric
                             emit_job_metric("failed", 1, {
                                 "infra_dao_slug": dao_slug,
                                 "job_type": job.type
                             })
-                            emit_job_metric("duration", duration, {
-                                "infra_dao_slug": dao_slug,
-                                "job_type": job.type
-                            }, metric_type="histogram")
                             
                             logger.error("Job failed", extra={
                                 "extra_fields": {
@@ -254,6 +268,14 @@ class JobQueue:
                             })
                         finally:
                             job.completed_at = datetime.now()
+                            
+                            # Emit seconds_since_last_success if we have a stored timestamp
+                            if dao_slug in self.last_success_timestamp:
+                                seconds_since = int(time.time()) - self.last_success_timestamp[dao_slug]
+                                emit_job_metric("seconds_since_last_success", seconds_since, {
+                                    "infra_dao_slug": dao_slug,
+                                    "job_type": job.type
+                                }, metric_type="gauge")
 
                             # Upload result to GCS - wrap in try-except to prevent blocking
                             try:
