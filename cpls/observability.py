@@ -8,47 +8,59 @@ All operations are designed to never crash the application if Datadog is unavail
 import logging
 import json
 import os
-from typing import Dict, Optional, Any
+import urllib.request
+from typing import Dict, Optional, List
 from datetime import datetime
+from time import time
 
-from datadog import initialize, statsd
 from .config import ENVIRONMENT
-
-# Initialize Datadog client (safe, won't crash if agent not running)
-_statsd_client = None
-_initialized = False
 
 # Logging initialization flag
 _logging_initialized = False
 
 
-def _ensure_initialized():
-    """Lazily initialize Datadog client. Safe if agent not available."""
-    global _statsd_client, _initialized
-    
-    if _initialized:
-        return _statsd_client
-    
+def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: float, metric_type: str, tags: List[str]):
+    """Send a single metric via Datadog HTTP API v2. Fire-and-forget, never raises exceptions."""
     try:
-        # Initialize with environment variable support for Railway/container deployments
-        # DD_AGENT_HOST and DD_DOGSTATSD_PORT are standard Datadog environment variables
-        statsd_host = os.getenv("DD_AGENT_HOST", "127.0.0.1")
-        statsd_port = int(os.getenv("DD_DOGSTATSD_PORT", "8125"))
-        initialize(statsd_host=statsd_host, statsd_port=statsd_port)
-        _statsd_client = statsd
-        _initialized = True
+        # Map histogram to gauge (can upgrade to distribution metrics later)
+        api_metric_type = "gauge" if metric_type == "histogram" else metric_type
+        
+        # Current Unix timestamp in seconds
+        timestamp = int(time())
+        
+        # Build payload according to Datadog v2 series API
+        payload = {
+            "series": [{
+                "metric": metric_name,
+                "type": api_metric_type,
+                "points": [[timestamp, value]],
+                "tags": tags
+            }]
+        }
+        
+        # Create request
+        url = f"{base_url}/api/v2/series"
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "DD-API-KEY": api_key,
+                "Content-Type": "application/json"
+            },
+            method="POST"
+        )
+        
+        # Send with short timeout (2 seconds) to avoid blocking
+        urllib.request.urlopen(req, timeout=2)
     except Exception:
-        # If initialization fails, we continue without metrics
-        # This ensures the app works even if Datadog is unavailable
-        _statsd_client = None
-        _initialized = True
-    
-    return _statsd_client
+        # Silently swallow all errors - metrics should never break the app
+        pass
 
 
 def emit_job_metric(name: str, value: float, tags: Optional[Dict[str, str]] = None, metric_type: str = "count"):
     """
-    Emit a job lifecycle metric to Datadog.
+    Emit a job lifecycle metric to Datadog via HTTP API.
     
     Args:
         name: Metric name (will be prefixed with "cpls.job.")
@@ -57,11 +69,19 @@ def emit_job_metric(name: str, value: float, tags: Optional[Dict[str, str]] = No
         metric_type: One of "count", "gauge", "histogram"
     
     This function never raises exceptions and silently fails if Datadog is unavailable.
+    Requires DD_API_KEY environment variable to be set. If missing, no-op.
     """
     try:
-        client = _ensure_initialized()
-        if client is None:
+        # Read API key at call time (not import time)
+        api_key = os.getenv("DD_API_KEY", "")
+        
+        # Skip if API key not configured (safe no-op)
+        if not api_key:
             return
+        
+        # Read DD_SITE at call time (not import time)
+        dd_site = os.getenv("DD_SITE", "datadoghq.com")
+        base_url = f"https://api.{dd_site}"
         
         # Build full metric name with prefix
         full_name = f"cpls.job.{name}"
@@ -78,16 +98,8 @@ def emit_job_metric(name: str, value: float, tags: Optional[Dict[str, str]] = No
                 if val is not None:  # Include zero/false values, only skip None
                     tag_list.append(f"{key}:{val}")
         
-        # Emit metric based on type
-        if metric_type == "count":
-            client.increment(full_name, value, tags=tag_list)
-        elif metric_type == "gauge":
-            client.gauge(full_name, value, tags=tag_list)
-        elif metric_type == "histogram":
-            client.histogram(full_name, value, tags=tag_list)
-        else:
-            # Unknown metric type, silently ignore
-            pass
+        # Send via HTTP API
+        _send_metric_via_api(base_url, api_key, full_name, value, metric_type, tag_list)
     except Exception:
         # Silently swallow all errors - metrics should never break the app
         pass
