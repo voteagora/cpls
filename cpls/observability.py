@@ -20,45 +20,41 @@ from .config import ENVIRONMENT
 _logging_initialized = False
 
 # Rate limiting for metric error logs (once per 60 seconds)
-_last_metric_error_log_ts = 0
-
-
-def _log_metric_error_once_per_minute(error_type: str, details: Dict):
-    """Log metric submission error at most once per 60 seconds. Rate-limited to prevent log flooding."""
-    global _last_metric_error_log_ts
-    
-    current_time = time()
-    if current_time - _last_metric_error_log_ts < 60:
-        return
-    
-    _last_metric_error_log_ts = current_time
-    
-    # Use print() for Railway logs visibility
-    print(f"DD_METRIC_{error_type}", json.dumps(details))
+_last_http_error_ts = 0
 
 
 def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: float, metric_type: str, tags: List[str]):
-    """Send a single metric via Datadog HTTP API v1. Fire-and-forget, never raises exceptions."""
+    """Send a single metric via Datadog HTTP API v2. Fire-and-forget, never raises exceptions."""
+    global _last_http_error_ts
+    
     url = None
     try:
-        # Map histogram to gauge (can upgrade to distribution metrics later)
-        api_metric_type = "gauge" if metric_type == "histogram" else metric_type
+        # Map metric_type to Datadog v2 type enum (int)
+        # 0 = unspecified, 1 = count, 2 = rate, 3 = gauge
+        if metric_type == "count":
+            type_enum = 1
+        elif metric_type == "gauge":
+            type_enum = 3
+        elif metric_type == "histogram":
+            type_enum = 3  # Treat histogram as gauge
+        else:
+            type_enum = 0  # unspecified
         
         # Current Unix timestamp in seconds
         timestamp = int(time())
         
-        # Build payload according to Datadog v1 series API
+        # Build payload according to Datadog v2 series API
         payload = {
             "series": [{
                 "metric": metric_name,
-                "type": api_metric_type,
-                "points": [[timestamp, value]],
+                "type": type_enum,
+                "points": [{"timestamp": timestamp, "value": value}],
                 "tags": tags
             }]
         }
         
         # Create request
-        url = f"{base_url}/api/v1/series"
+        url = f"{base_url}/api/v2/series"
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(
             url,
@@ -71,7 +67,10 @@ def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: f
         )
         
         # Send with short timeout (2 seconds) to avoid blocking
-        urllib.request.urlopen(req, timeout=2)
+        response = urllib.request.urlopen(req, timeout=2)
+        # Temporary: log success to verify metrics are being sent
+        if response.getcode() == 202:
+            print("DD_METRIC_SUCCESS", json.dumps({"metric": metric_name, "status": 202}))
     except urllib.error.HTTPError as e:
         # HTTP error with status code and response body
         body = ""
@@ -80,15 +79,38 @@ def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: f
         except Exception:
             pass
         
-        _log_metric_error_once_per_minute("HTTP_ERROR", {
-            "status": e.code,
-            "body": body
-        })
+        # Rate-limited WARNING log (at most once per 60 seconds)
+        current_time = time()
+        if current_time - _last_http_error_ts >= 60:
+            _last_http_error_ts = current_time
+            logger = get_logger("cpls.metrics")
+            logger.warning("Datadog metric submission failed", extra={
+                "extra_fields": {
+                    "endpoint": url or "unknown",
+                    "env": ENVIRONMENT,
+                    "metric_name": metric_name,
+                    "exception_class": type(e).__name__,
+                    "error": str(e),
+                    "status_code": e.code,
+                    "response_body": body
+                }
+            })
     except Exception as e:
         # Any other exception
-        _log_metric_error_once_per_minute("EXCEPTION", {
-            "error": str(e)
-        })
+        # Rate-limited WARNING log (at most once per 60 seconds)
+        current_time = time()
+        if current_time - _last_http_error_ts >= 60:
+            _last_http_error_ts = current_time
+            logger = get_logger("cpls.metrics")
+            logger.warning("Datadog metric submission failed", extra={
+                "extra_fields": {
+                    "endpoint": url or "unknown",
+                    "env": ENVIRONMENT,
+                    "metric_name": metric_name,
+                    "exception_class": type(e).__name__,
+                    "error": str(e)
+                }
+            })
 
 
 def emit_job_metric(name: str, value: float, tags: Optional[Dict[str, str]] = None, metric_type: str = "count"):
