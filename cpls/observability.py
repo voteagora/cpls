@@ -39,7 +39,7 @@ def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: f
         }
         
         # Create request
-        url = f"{base_url}/api/v2/series"
+        url = f"{base_url}/api/v1/series"
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(
             url,
