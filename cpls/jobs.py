@@ -2,6 +2,7 @@ import asyncio
 import uuid
 import traceback
 import time
+import json
 
 from typing import Dict, Optional, List, TYPE_CHECKING
 from datetime import datetime
@@ -18,7 +19,7 @@ import requests as r
 
 from .gcs import GCSClient
 from .config import GCS_BUCKET_NAME, create_http_client
-from .observability import emit_job_metric, get_logger
+from .observability import emit_job_metric, emit_metric, get_logger
 
 logger = get_logger("cpls.jobs")
 
@@ -66,6 +67,18 @@ class JobQueue:
             self.dao_locks[dao_slug] = asyncio.Lock()
         return self.dao_locks[dao_slug]
 
+    def _get_oldest_pending_job_age_seconds(self, dao_slug: str) -> float:
+        """Age in seconds of the oldest PENDING job for a specific DAO."""
+        pending_jobs = [
+            job for job in self.jobs.values()
+            if job.status == JobStatus.PENDING
+            and job.payload.get('infra_dao_slug') == dao_slug
+        ]
+        if not pending_jobs:
+            return 0.0
+        oldest_job = min(pending_jobs, key=lambda j: j.created_at)
+        return (datetime.now() - oldest_job.created_at).total_seconds()
+
     async def add_job(self, job_type: str, payload: Dict) -> str:
         job_id = str(uuid.uuid4())
         job = Job(
@@ -78,24 +91,27 @@ class JobQueue:
         infra_dao_slug = payload.get('infra_dao_slug', 'unknown')
         dao_lock = self._get_dao_lock(infra_dao_slug)
         
+        # Calculate payload size in bytes
+        payload_bytes = len(json.dumps(payload).encode('utf-8'))
+        
+        # Build base tags
+        base_tags = {
+            "infra_dao_slug": infra_dao_slug,
+            "job_type": job_type
+        }
+        
         if dao_lock.locked():
             job.status = JobStatus.SKIPPED
             job.error = "Queue is full, job skipped"
             self.jobs[job_id] = job
             
             # Emit skipped metric
-            emit_job_metric("skipped", 1, {
-                "infra_dao_slug": infra_dao_slug,
-                "job_type": job_type
-            })
+            emit_job_metric("skipped", 1, base_tags)
             
             # Emit seconds_since_last_success if we have a stored timestamp
             if infra_dao_slug in self.last_success_timestamp:
                 seconds_since = int(time.time()) - self.last_success_timestamp[infra_dao_slug]
-                emit_job_metric("seconds_since_last_success", seconds_since, {
-                    "infra_dao_slug": infra_dao_slug,
-                    "job_type": job_type
-                }, metric_type="gauge")
+                emit_job_metric("seconds_since_last_success", seconds_since, base_tags, metric_type="gauge")
             
             logger.warning("Job skipped due to lock", extra={
                 "extra_fields": {
@@ -109,15 +125,31 @@ class JobQueue:
             self.jobs[job_id] = job
             await self.queue.put(job)
             
-            # Emit queued metric and queue depth gauge
-            emit_job_metric("queued", 1, {
-                "infra_dao_slug": infra_dao_slug,
-                "job_type": job_type
-            })
-            emit_job_metric("queue_depth", self.queue.qsize(), {
-                "infra_dao_slug": infra_dao_slug,
-                "job_type": job_type
-            }, metric_type="gauge")
+            # Emit queued metric
+            emit_job_metric("queued", 1, base_tags)
+            
+            # Build queue-level tags (without job_type, as these are infra-level metrics)
+            queue_tags = {"infra_dao_slug": infra_dao_slug}
+            
+            # Emit queue depth gauge
+            emit_metric("cpls.queue.depth", self.queue.qsize(), queue_tags, metric_type="gauge")
+            
+            # Emit payload size distribution
+            emit_metric("cpls.job.payload_bytes", payload_bytes, base_tags, metric_type="distribution")
+            
+            # Emit payload size by job type if applicable
+            logic = payload.get('logic', '')
+            if logic == 'refresh_list':
+                # Determine if this is voters or proposals based on sources
+                sources = payload.get('sources', [])
+                if 'snapshot' in sources or 'dao_node' in sources:
+                    emit_metric("cpls.refresh.voters.payload_bytes", payload_bytes, base_tags, metric_type="distribution")
+                if 'eas-atlas' in sources or 'eas-oodao' in sources:
+                    emit_metric("cpls.refresh.proposals.payload_bytes", payload_bytes, base_tags, metric_type="distribution")
+            
+            # Calculate and emit oldest pending job age for this DAO (only PENDING jobs, not completed/failed/etc)
+            oldest_age_seconds = self._get_oldest_pending_job_age_seconds(infra_dao_slug)
+            emit_metric("cpls.queue.oldest_job_age_seconds", oldest_age_seconds, queue_tags, metric_type="gauge")
             
             logger.debug("Job queued", extra={
                 "extra_fields": {
@@ -191,11 +223,14 @@ class JobQueue:
                         job.status = JobStatus.PROCESSING
                         job.started_at = datetime.now()
                         
-                        # Emit started metric
-                        emit_job_metric("started", 1, {
+                        # Build base tags
+                        base_tags = {
                             "infra_dao_slug": dao_slug,
                             "job_type": job.type
-                        })
+                        }
+                        
+                        # Emit started metric
+                        emit_job_metric("started", 1, base_tags)
 
                         # Track job execution duration
                         start_time = time.time()
@@ -203,30 +238,19 @@ class JobQueue:
                             await self._execute_job(job)
                             job.status = JobStatus.COMPLETED
                             
-                            # Calculate duration
-                            duration = time.time() - start_time
+                            # Calculate duration in milliseconds
+                            duration_seconds = time.time() - start_time
+                            duration_ms = duration_seconds * 1000
                             current_timestamp = int(time.time())
                             
                             # Store last success timestamp for this DAO
                             self.last_success_timestamp[dao_slug] = current_timestamp
                             
                             # Emit success metrics
-                            emit_job_metric("completed", 1, {
-                                "infra_dao_slug": dao_slug,
-                                "job_type": job.type
-                            })
-                            emit_job_metric("duration_seconds", duration, {
-                                "infra_dao_slug": dao_slug,
-                                "job_type": job.type
-                            }, metric_type="histogram")
-                            emit_job_metric("last_success_timestamp", current_timestamp, {
-                                "infra_dao_slug": dao_slug,
-                                "job_type": job.type
-                            }, metric_type="gauge")
-                            emit_job_metric("seconds_since_last_success", 0, {
-                                "infra_dao_slug": dao_slug,
-                                "job_type": job.type
-                            }, metric_type="gauge")
+                            emit_job_metric("completed", 1, base_tags)
+                            emit_job_metric("duration_ms", duration_ms, base_tags, metric_type="distribution")
+                            emit_job_metric("last_success_timestamp", current_timestamp, base_tags, metric_type="gauge")
+                            emit_job_metric("seconds_since_last_success", 0, base_tags, metric_type="gauge")
                             
                             logger.info("Job completed", extra={
                                 "extra_fields": {
@@ -234,7 +258,7 @@ class JobQueue:
                                     "infra_dao_slug": dao_slug,
                                     "job_type": job.type,
                                     "status": "completed",
-                                    "duration_seconds": duration,
+                                    "duration_seconds": duration_seconds,
                                     "stats": job.stats
                                 }
                             })
@@ -246,14 +270,26 @@ class JobQueue:
                             # Store full traceback in job
                             job.error = full_traceback
                             
-                            # Calculate duration even on failure
-                            duration = time.time() - start_time
+                            # Calculate duration even on failure (in milliseconds)
+                            duration_seconds = time.time() - start_time
+                            duration_ms = duration_seconds * 1000
                             
-                            # Emit failed metric
-                            emit_job_metric("failed", 1, {
-                                "infra_dao_slug": dao_slug,
-                                "job_type": job.type
-                            })
+                            # Classify error type
+                            error_type = "unknown"
+                            error_str = str(e).lower()
+                            if "timeout" in error_str or "timed out" in error_str:
+                                error_type = "timeout"
+                            elif "database" in error_str or "db" in error_str or "sql" in error_str:
+                                error_type = "db_error"
+                            elif "http" in error_str or "connection" in error_str or "network" in error_str:
+                                error_type = "upstream_error"
+                            elif "validation" in error_str or "invalid" in error_str:
+                                error_type = "validation_error"
+                            
+                            # Emit failed metric with error classification
+                            failed_tags = base_tags.copy()
+                            failed_tags["error_type"] = error_type
+                            emit_job_metric("failed", 1, failed_tags)
                             
                             logger.error("Job failed", extra={
                                 "extra_fields": {
@@ -261,7 +297,7 @@ class JobQueue:
                                     "infra_dao_slug": dao_slug,
                                     "job_type": job.type,
                                     "status": "failed",
-                                    "duration_seconds": duration,
+                                    "duration_seconds": duration_seconds,
                                     "error": str(e),
                                     "traceback": full_traceback
                                 }
@@ -352,6 +388,13 @@ class JobQueue:
 
         gcs_client = GCSClient(GCS_BUCKET_NAME)
         
+        # Build base tags for metrics
+        infra_dao_slug = job.payload['infra_dao_slug']
+        base_tags = {
+            "infra_dao_slug": infra_dao_slug,
+            "job_type": job.type
+        }
+        
         for source in job.payload['sources']:
 
             stats = {
@@ -359,7 +402,6 @@ class JobQueue:
                 'refreshed': 0
             }
 
-            infra_dao_slug = job.payload['infra_dao_slug']
             config = job.payload['config']
 
             if "refresh_list" == job.payload['logic']:
@@ -373,16 +415,28 @@ class JobQueue:
                     }
                 })
                 
-                if source == 'dao_node':
-                    stats = await DaoNodeSync(infra_dao_slug, config, reset, self.http_client).refresh_list(gcs_client)
-                elif source == 'eas-atlas':
-                    stats = await EASAtlasSync(infra_dao_slug, config, reset, self.http_client).refresh_list(gcs_client)
-                elif source == 'eas-oodao':
-                    stats = await EASOoDaoSync(infra_dao_slug, config, reset, self.http_client).refresh_list(gcs_client)
-                elif source == 'snapshot':
-                    stats = await SnapshotSync(infra_dao_slug, config, reset, self.http_client).refresh_list(gcs_client)
-                else:
-                    raise Exception(f"Unknown source: {source}")
+                # Track refresh duration
+                refresh_start = time.time()
+                try:
+                    if source == 'dao_node':
+                        stats = await DaoNodeSync(infra_dao_slug, config, reset, self.http_client).refresh_list(gcs_client)
+                    elif source == 'eas-atlas':
+                        stats = await EASAtlasSync(infra_dao_slug, config, reset, self.http_client).refresh_list(gcs_client)
+                    elif source == 'eas-oodao':
+                        stats = await EASOoDaoSync(infra_dao_slug, config, reset, self.http_client).refresh_list(gcs_client)
+                    elif source == 'snapshot':
+                        stats = await SnapshotSync(infra_dao_slug, config, reset, self.http_client).refresh_list(gcs_client)
+                    else:
+                        raise Exception(f"Unknown source: {source}")
+                finally:
+                    # Emit refresh duration metric
+                    refresh_duration_ms = (time.time() - refresh_start) * 1000
+                    
+                    # Determine if this is voters or proposals refresh
+                    if source in ['snapshot', 'dao_node']:
+                        emit_metric("cpls.refresh.voters.duration_ms", refresh_duration_ms, base_tags, metric_type="distribution")
+                    elif source in ['eas-atlas', 'eas-oodao']:
+                        emit_metric("cpls.refresh.proposals.duration_ms", refresh_duration_ms, base_tags, metric_type="distribution")
                 
             # Collect stats
             if stats:
@@ -396,6 +450,10 @@ class JobQueue:
             'total_refreshed': total_refreshed,
             'by_source': stats_by_source
         }
+        
+        # Emit batch size if we have refreshed count
+        if total_refreshed > 0:
+            emit_metric("cpls.batch.size", total_refreshed, base_tags, metric_type="distribution")
 
     def get_all_jobs(self) -> 'List[Job]':
         """Get all jobs sorted by creation time"""

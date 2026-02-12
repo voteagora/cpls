@@ -54,13 +54,15 @@ def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: f
     url = None
     try:
         # Map metric_type to Datadog v2 type enum (int)
-        # 0 = unspecified, 1 = count, 2 = rate, 3 = gauge
+        # 0 = unspecified, 1 = count, 2 = rate, 3 = gauge, 4 = distribution
         if metric_type == "count":
             type_enum = 1
         elif metric_type == "gauge":
             type_enum = 3
+        elif metric_type == "distribution":
+            type_enum = 4
         elif metric_type == "histogram":
-            type_enum = 3  # Treat histogram as gauge
+            type_enum = 4  # Map histogram to distribution for proper percentiles
         else:
             type_enum = 0  # unspecified
         
@@ -106,15 +108,15 @@ def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: f
         _log_metric_error_once(metric_name, url, e)
 
 
-def emit_job_metric(name: str, value: float, tags: Optional[Dict[str, str]] = None, metric_type: str = "count"):
+def emit_metric(name: str, value: float, tags: Optional[Dict[str, str]] = None, metric_type: str = "count"):
     """
-    Emit a job lifecycle metric to Datadog via HTTP API.
+    Emit a metric to Datadog via HTTP API with full metric name.
     
     Args:
-        name: Metric name (will be prefixed with "cpls.job.")
+        name: Full metric name (e.g., "cpls.job.completed" or "cpls.queue.depth")
         value: Metric value
-        tags: Additional tags (infra_dao_slug, job_type will be added automatically)
-        metric_type: One of "count", "gauge", "histogram"
+        tags: Additional tags (env and service:cpls will be added automatically)
+        metric_type: One of "count", "gauge", "distribution", "histogram" (histogram maps to distribution)
     
     This function never raises exceptions and silently fails if Datadog is unavailable.
     Requires DD_API_KEY environment variable to be set. If missing, no-op.
@@ -131,9 +133,6 @@ def emit_job_metric(name: str, value: float, tags: Optional[Dict[str, str]] = No
         dd_site = os.getenv("DD_SITE", "datadoghq.com")
         base_url = f"https://api.{dd_site}"
         
-        # Build full metric name with prefix
-        full_name = f"cpls.job.{name}"
-        
         # Build tags list with required tags
         tag_list = [
             f"env:{ENVIRONMENT}",
@@ -147,10 +146,27 @@ def emit_job_metric(name: str, value: float, tags: Optional[Dict[str, str]] = No
                     tag_list.append(f"{key}:{val}")
         
         # Send via HTTP API
-        _send_metric_via_api(base_url, api_key, full_name, value, metric_type, tag_list)
+        _send_metric_via_api(base_url, api_key, name, value, metric_type, tag_list)
     except Exception:
         # Silently swallow all errors - metrics should never break the app
         pass
+
+
+def emit_job_metric(name: str, value: float, tags: Optional[Dict[str, str]] = None, metric_type: str = "count"):
+    """
+    Emit a job lifecycle metric to Datadog via HTTP API.
+    
+    Args:
+        name: Metric name (will be prefixed with "cpls.job.")
+        value: Metric value
+        tags: Additional tags (infra_dao_slug, job_type will be added automatically)
+        metric_type: One of "count", "gauge", "distribution", "histogram" (histogram maps to distribution)
+    
+    This function never raises exceptions and silently fails if Datadog is unavailable.
+    Requires DD_API_KEY environment variable to be set. If missing, no-op.
+    """
+    full_name = f"cpls.job.{name}"
+    emit_metric(full_name, value, tags, metric_type)
 
 
 class JSONFormatter(logging.Formatter):
