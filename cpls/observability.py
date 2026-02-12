@@ -23,7 +23,7 @@ _logging_initialized = False
 _last_metric_error_log_ts = 0
 
 
-def _log_metric_error_once_per_minute(details: Dict):
+def _log_metric_error_once_per_minute(error_type: str, details: Dict):
     """Log metric submission error at most once per 60 seconds. Rate-limited to prevent log flooding."""
     global _last_metric_error_log_ts
     
@@ -33,10 +33,8 @@ def _log_metric_error_once_per_minute(details: Dict):
     
     _last_metric_error_log_ts = current_time
     
-    logger = get_logger("cpls.metrics")
-    logger.error("Datadog metric submission failed", extra={
-        "extra_fields": details
-    })
+    # Use print() for Railway logs visibility
+    print(f"DD_METRIC_{error_type}", json.dumps(details))
 
 
 def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: float, metric_type: str, tags: List[str]):
@@ -76,28 +74,27 @@ def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: f
         urllib.request.urlopen(req, timeout=2)
     except urllib.error.HTTPError as e:
         # HTTP error with status code and response body
-        response_body = ""
+        body = ""
         try:
-            response_body = e.read().decode('utf-8', errors='replace')[:500]
+            body = e.read().decode("utf-8", errors="replace")[:500]
         except Exception:
             pass
         
-        _log_metric_error_once_per_minute({
-            "dd_endpoint": url or "unknown",
-            "status_code": e.code,
-            "response_body": response_body,
-            "error": str(e)
+        _log_metric_error_once_per_minute("HTTPERROR", {
+            "url": url or "unknown",
+            "status": e.code,
+            "body": body
         })
     except urllib.error.URLError as e:
         # URL error (connection, timeout, etc.)
-        _log_metric_error_once_per_minute({
-            "dd_endpoint": url or "unknown",
+        _log_metric_error_once_per_minute("URLERROR", {
+            "url": url or "unknown",
             "error": str(e)
         })
     except Exception as e:
         # Any other exception
-        _log_metric_error_once_per_minute({
-            "dd_endpoint": url or "unknown",
+        _log_metric_error_once_per_minute("EXCEPTION", {
+            "url": url or "unknown",
             "error": str(e)
         })
 
