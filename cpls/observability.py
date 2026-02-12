@@ -104,9 +104,13 @@ def emit_job_metric(name: str, value: float, tags: Optional[Dict[str, str]] = No
     This function never raises exceptions and silently fails if Datadog is unavailable.
     Requires DD_API_KEY environment variable to be set. If missing, no-op.
     """
+    print("DD_METRIC_CALLED", json.dumps({"name": name, "env": ENVIRONMENT}))
+    
     try:
         # Read API key at call time (not import time)
         api_key = os.getenv("DD_API_KEY", "")
+        
+        print("DD_METRIC_KEY_PRESENT", json.dumps({"present": bool(api_key)}))
         
         # Skip if API key not configured (safe no-op)
         if not api_key:
