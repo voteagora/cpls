@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 import traceback
+import time
 
 from typing import Dict, Optional, List, TYPE_CHECKING
 from datetime import datetime
@@ -17,6 +18,9 @@ import requests as r
 
 from .gcs import GCSClient
 from .config import GCS_BUCKET_NAME, create_http_client
+from .observability import emit_job_metric, get_logger
+
+logger = get_logger("cpls.jobs")
 
 class JobStatus(str, Enum):
     PENDING = "pending"
@@ -69,54 +73,153 @@ class JobQueue:
             created_at=datetime.now()
         )
 
-        dao_lock = self._get_dao_lock(payload['infra_dao_slug'])
+        infra_dao_slug = payload.get('infra_dao_slug', 'unknown')
+        dao_lock = self._get_dao_lock(infra_dao_slug)
+        
         if dao_lock.locked():
             job.status = JobStatus.SKIPPED
             job.error = "Queue is full, job skipped"
             self.jobs[job_id] = job
+            
+            # Emit skipped metric
+            emit_job_metric("skipped", 1, {
+                "infra_dao_slug": infra_dao_slug,
+                "job_type": job_type
+            })
+            
+            logger.warning("Job skipped due to lock", extra={
+                "extra_fields": {
+                    "job_id": job_id,
+                    "infra_dao_slug": infra_dao_slug,
+                    "job_type": job_type,
+                    "status": "skipped"
+                }
+            })
         else:
             self.jobs[job_id] = job
             await self.queue.put(job)
-    
+            
+            # Emit queued metric and queue depth gauge
+            emit_job_metric("queued", 1, {
+                "infra_dao_slug": infra_dao_slug,
+                "job_type": job_type
+            })
+            emit_job_metric("queue_depth", self.queue.qsize(), {
+                "infra_dao_slug": infra_dao_slug,
+                "job_type": job_type
+            }, metric_type="gauge")
+            
+            logger.info("Job queued", extra={
+                "extra_fields": {
+                    "job_id": job_id,
+                    "infra_dao_slug": infra_dao_slug,
+                    "job_type": job_type,
+                    "status": "queued"
+                }
+            })
 
         return job_id
 
     async def _worker(self, worker_id: int, gcs_client: 'GCSClient'):
         """Worker task that processes jobs from the queue"""
-        print(f"🔧 Worker {worker_id} started")
+        logger.info("Worker started", extra={
+            "extra_fields": {"worker_id": worker_id}
+        })
 
         # Wait for all workers to be ready before consuming
         await self.workers_ready.wait()
-        print(f"🔧 Worker {worker_id} ready to process jobs")
+        logger.info("Worker ready to process jobs", extra={
+            "extra_fields": {"worker_id": worker_id}
+        })
 
         while self.processing:
             try:
                 job = await self.queue.get()
-                print(f"🔧 Worker {worker_id} got job {job.id}")
+                logger.debug("Worker got job", extra={
+                    "extra_fields": {
+                        "worker_id": worker_id,
+                        "job_id": job.id
+                    }
+                })
 
                 # Extract DAO slug from job payload
                 dao_slug = job.payload.get('infra_dao_slug')
                 if not dao_slug:
-                    print(f"Warning: Job {job.id} has no infra_dao_slug, skipping")
+                    logger.warning("Job has no infra_dao_slug, skipping", extra={
+                        "extra_fields": {
+                            "job_id": job.id,
+                            "worker_id": worker_id
+                        }
+                    })
                     self.queue.task_done()
                     continue
 
                 # Acquire lock for this DAO to ensure only one job per DAO
                 dao_lock = self._get_dao_lock(dao_slug)
 
-                print(f"🔧 Worker {worker_id} attempting to acquire lock for DAO {dao_slug}")
+                logger.debug("Worker attempting to acquire lock", extra={
+                    "extra_fields": {
+                        "worker_id": worker_id,
+                        "job_id": job.id,
+                        "infra_dao_slug": dao_slug
+                    }
+                })
+                
                 try:
                     async with dao_lock:
-                        print(f"✅ Worker {worker_id} processing job {job.id} for DAO {dao_slug} (LOCK ACQUIRED)")
+                        logger.info("Worker processing job (LOCK ACQUIRED)", extra={
+                            "extra_fields": {
+                                "worker_id": worker_id,
+                                "job_id": job.id,
+                                "infra_dao_slug": dao_slug,
+                                "job_type": job.type
+                            }
+                        })
 
                         # Update current_job for backward compatibility (shows last job started)
                         self.current_job = job
                         job.status = JobStatus.PROCESSING
                         job.started_at = datetime.now()
+                        
+                        # Emit started metric
+                        emit_job_metric("started", 1, {
+                            "infra_dao_slug": dao_slug,
+                            "job_type": job.type
+                        })
 
+                        # Track job execution duration
+                        start_time = time.time()
                         try:
                             await self._execute_job(job)
                             job.status = JobStatus.COMPLETED
+                            
+                            # Calculate duration
+                            duration = time.time() - start_time
+                            
+                            # Emit completed metric, duration histogram, and last_success_timestamp gauge
+                            emit_job_metric("completed", 1, {
+                                "infra_dao_slug": dao_slug,
+                                "job_type": job.type
+                            })
+                            emit_job_metric("duration", duration, {
+                                "infra_dao_slug": dao_slug,
+                                "job_type": job.type
+                            }, metric_type="histogram")
+                            emit_job_metric("last_success_timestamp", datetime.utcnow().timestamp(), {
+                                "infra_dao_slug": dao_slug,
+                                "job_type": job.type
+                            }, metric_type="gauge")
+                            
+                            logger.info("Job completed", extra={
+                                "extra_fields": {
+                                    "job_id": job.id,
+                                    "infra_dao_slug": dao_slug,
+                                    "job_type": job.type,
+                                    "status": "completed",
+                                    "duration_seconds": duration,
+                                    "stats": job.stats
+                                }
+                            })
                         except Exception as e:
                             job.status = JobStatus.FAILED
                             # Capture the full traceback
@@ -124,16 +227,31 @@ class JobQueue:
 
                             # Store full traceback in job
                             job.error = full_traceback
-
-                            # Print detailed error information
-                            print(f"\n{'='*60}")
-                            print(f"❌ JOB FAILED: {job.id} (Worker {worker_id})")
-                            print(f"Job Type: {job.type}")
-                            print(f"DAO: {dao_slug}")
-                            print(f"{'='*60}")
-                            print("Full Traceback:")
-                            print(full_traceback)
-                            print(f"{'='*60}\n")
+                            
+                            # Calculate duration even on failure
+                            duration = time.time() - start_time
+                            
+                            # Emit failed metric and duration histogram
+                            emit_job_metric("failed", 1, {
+                                "infra_dao_slug": dao_slug,
+                                "job_type": job.type
+                            })
+                            emit_job_metric("duration", duration, {
+                                "infra_dao_slug": dao_slug,
+                                "job_type": job.type
+                            }, metric_type="histogram")
+                            
+                            logger.error("Job failed", extra={
+                                "extra_fields": {
+                                    "job_id": job.id,
+                                    "infra_dao_slug": dao_slug,
+                                    "job_type": job.type,
+                                    "status": "failed",
+                                    "duration_seconds": duration,
+                                    "error": str(e),
+                                    "traceback": full_traceback
+                                }
+                            })
                         finally:
                             job.completed_at = datetime.now()
 
@@ -141,27 +259,42 @@ class JobQueue:
                             try:
                                 await gcs_client.safe_upload_job_result(job)
                             except Exception as upload_error:
-                                print(f"⚠️ Failed to upload job result to GCS for job {job.id}: {upload_error}")
-                                print(traceback.format_exc())
+                                logger.error("Failed to upload job result to GCS", extra={
+                                    "extra_fields": {
+                                        "job_id": job.id,
+                                        "error": str(upload_error),
+                                        "traceback": traceback.format_exc()
+                                    }
+                                })
 
-                            print(f"🔓 Worker {worker_id} finished job {job.id} for DAO {dao_slug} (LOCK RELEASED)")
+                            logger.debug("Worker finished job (LOCK RELEASED)", extra={
+                                "extra_fields": {
+                                    "worker_id": worker_id,
+                                    "job_id": job.id,
+                                    "infra_dao_slug": dao_slug
+                                }
+                            })
                 finally:
                     # Always call task_done, even if lock acquisition or job processing failed
                     self.queue.task_done()
 
             except asyncio.CancelledError:
-                print(f"Worker {worker_id} cancelled")
+                logger.info("Worker cancelled", extra={
+                    "extra_fields": {"worker_id": worker_id}
+                })
                 break
             except Exception as e:
-                print(f"\n{'='*60}")
-                print(f"❌ CRITICAL ERROR in worker {worker_id}:")
-                print(f"Error: {e}")
-                print(f"{'='*60}")
-                print("Full Traceback:")
-                print(traceback.format_exc())
-                print(f"{'='*60}\n")
+                logger.error("Critical error in worker", extra={
+                    "extra_fields": {
+                        "worker_id": worker_id,
+                        "error": str(e),
+                        "traceback": traceback.format_exc()
+                    }
+                })
 
-        print(f"Worker {worker_id} stopped")
+        logger.info("Worker stopped", extra={
+            "extra_fields": {"worker_id": worker_id}
+        })
 
     async def process_jobs(self, gcs_client: 'GCSClient'):
         """Start concurrent workers to process jobs from the queue"""
@@ -177,13 +310,15 @@ class JobQueue:
 
         # Signal all workers to start consuming
         self.workers_ready.set()
-        print(f"✅ Started {self.num_workers} concurrent workers")
+        logger.info("Started concurrent workers", extra={
+            "extra_fields": {"num_workers": self.num_workers}
+        })
 
         # Wait for all workers to complete (when stop() is called)
         try:
             await asyncio.gather(*self.worker_tasks)
         except asyncio.CancelledError:
-            print("Job processing cancelled")
+            logger.info("Job processing cancelled")
 
     async def _execute_job(self, job: Job):
         """Execute the actual job logic"""
@@ -205,12 +340,17 @@ class JobQueue:
             infra_dao_slug = job.payload['infra_dao_slug']
             config = job.payload['config']
 
-            print(f"Job ID: {job}")
-
             if "refresh_list" == job.payload['logic']:
                 reset = job.payload['reset']
 
-                print("Handling {source} for {infra_dao_slug}".format(source=source, infra_dao_slug=infra_dao_slug))
+                logger.debug("Processing source", extra={
+                    "extra_fields": {
+                        "job_id": job.id,
+                        "infra_dao_slug": infra_dao_slug,
+                        "source": source
+                    }
+                })
+                
                 if source == 'dao_node':
                     stats = await DaoNodeSync(infra_dao_slug, config, reset, self.http_client).refresh_list(gcs_client)
                 elif source == 'eas-atlas':
@@ -235,7 +375,14 @@ class JobQueue:
             'by_source': stats_by_source
         }
 
-        print(f"Completed job {job.id} - Refreshed: {total_refreshed}, Skipped: {total_skipped}")
+        logger.info("Job execution completed", extra={
+            "extra_fields": {
+                "job_id": job.id,
+                "infra_dao_slug": job.payload.get('infra_dao_slug'),
+                "total_refreshed": total_refreshed,
+                "total_skipped": total_skipped
+            }
+        })
 
     def get_all_jobs(self) -> 'List[Job]':
         """Get all jobs sorted by creation time"""
