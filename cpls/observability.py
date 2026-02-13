@@ -50,25 +50,24 @@ def _log_metric_error_once(metric_name: str, url: str, exception: Exception, sta
 
 
 def _send_distribution_via_api(base_url: str, api_key: str, metric_name: str, value: float, tags: List[str]):
-    """Send a distribution metric via Datadog v2 series API. Fire-and-forget, never raises exceptions."""
+    """Send a distribution metric via Datadog v1 distribution_points API. Fire-and-forget, never raises exceptions."""
     url = None
     try:
         # Current Unix timestamp in seconds
         timestamp = int(time())
         
-        # Build payload according to Datadog v2 series API
-        # Note: v2 series API uses type 4 for distribution, same format as count/gauge
+        # Build payload according to Datadog v1 distribution_points API
+        # Note: points is array of 2-item arrays, value must be wrapped in array, no "type" field
         payload = {
             "series": [{
                 "metric": metric_name,
-                "type": 4,  # 4 = distribution
-                "points": [{"timestamp": timestamp, "value": value}],
+                "points": [[timestamp, [float(value)]]],
                 "tags": tags
             }]
         }
         
         # Create request
-        url = f"{base_url}/api/v2/series"
+        url = f"{base_url}/api/v1/distribution_points"
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(
             url,
@@ -97,9 +96,9 @@ def _send_distribution_via_api(base_url: str, api_key: str, metric_name: str, va
 
 
 def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: float, metric_type: str, tags: List[str]):
-    """Send a single metric via Datadog HTTP API v2. Fire-and-forget, never raises exceptions."""
+    """Send a single metric via Datadog HTTP API (v2 series for count/gauge; v1 distribution_points for distributions). Fire-and-forget, never raises exceptions."""
     # Route distribution and histogram metrics to distribution_points endpoint
-    if metric_type == "distribution" or metric_type == "histogram":
+    if metric_type in ("distribution", "histogram"):
         _send_distribution_via_api(base_url, api_key, metric_name, value, tags)
         return
     
