@@ -49,20 +49,68 @@ def _log_metric_error_once(metric_name: str, url: str, exception: Exception, sta
     logger.warning("Datadog metric submission failed", extra={"extra_fields": extra_fields})
 
 
+def _send_distribution_via_api(base_url: str, api_key: str, metric_name: str, value: float, tags: List[str]):
+    """Send a distribution metric via Datadog distribution_points API. Fire-and-forget, never raises exceptions."""
+    url = None
+    try:
+        # Current Unix timestamp in seconds
+        timestamp = int(time())
+        
+        # Build payload according to Datadog v2 distribution_points API
+        # Note: value must be an ARRAY of numbers, and we do NOT include "type" field
+        payload = {
+            "series": [{
+                "metric": metric_name,
+                "points": [{"timestamp": timestamp, "value": [value]}],
+                "tags": tags
+            }]
+        }
+        
+        # Create request
+        url = f"{base_url}/api/v2/distribution_points"
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "DD-API-KEY": api_key,
+                "Content-Type": "application/json"
+            },
+            method="POST"
+        )
+        
+        # Send with short timeout (2 seconds) to avoid blocking
+        urllib.request.urlopen(req, timeout=2)
+    except urllib.error.HTTPError as e:
+        # HTTP error with status code and response body
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace")[:300]
+        except Exception:
+            pass
+        
+        _log_metric_error_once(metric_name, url, e, status_code=e.code, response_body=body)
+    except Exception as e:
+        # Any other exception
+        _log_metric_error_once(metric_name, url, e)
+
+
 def _send_metric_via_api(base_url: str, api_key: str, metric_name: str, value: float, metric_type: str, tags: List[str]):
     """Send a single metric via Datadog HTTP API v2. Fire-and-forget, never raises exceptions."""
+    # Route distribution and histogram metrics to distribution_points endpoint
+    if metric_type == "distribution" or metric_type == "histogram":
+        _send_distribution_via_api(base_url, api_key, metric_name, value, tags)
+        return
+    
+    # For count and gauge, use the series endpoint
     url = None
     try:
         # Map metric_type to Datadog v2 type enum (int)
-        # 0 = unspecified, 1 = count, 2 = rate, 3 = gauge, 4 = distribution
+        # 0 = unspecified, 1 = count, 2 = rate, 3 = gauge
         if metric_type == "count":
             type_enum = 1
         elif metric_type == "gauge":
             type_enum = 3
-        elif metric_type == "distribution":
-            type_enum = 4
-        elif metric_type == "histogram":
-            type_enum = 4  # Map histogram to distribution for proper percentiles
         else:
             type_enum = 0  # unspecified
         
