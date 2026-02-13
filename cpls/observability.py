@@ -50,24 +50,25 @@ def _log_metric_error_once(metric_name: str, url: str, exception: Exception, sta
 
 
 def _send_distribution_via_api(base_url: str, api_key: str, metric_name: str, value: float, tags: List[str]):
-    """Send a distribution metric via Datadog distribution_points API. Fire-and-forget, never raises exceptions."""
+    """Send a distribution metric via Datadog v1 series API. Fire-and-forget, never raises exceptions."""
     url = None
     try:
         # Current Unix timestamp in seconds
         timestamp = int(time())
         
-        # Build payload according to Datadog v2 distribution_points API
-        # Note: value must be an ARRAY of numbers, and we do NOT include "type" field
+        # Build payload according to Datadog v1 series API
+        # Note: v1 series API uses points as array of tuples [[timestamp, value]] and type as string "distribution"
         payload = {
             "series": [{
                 "metric": metric_name,
-                "points": [{"timestamp": timestamp, "value": [value]}],
+                "type": "distribution",
+                "points": [[timestamp, value]],
                 "tags": tags
             }]
         }
         
         # Create request
-        url = f"{base_url}/api/v2/distribution_points"
+        url = f"{base_url}/api/v1/series"
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(
             url,
