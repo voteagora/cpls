@@ -135,7 +135,7 @@ class JobQueue:
             emit_metric("cpls.queue.depth", self.queue.qsize(), queue_tags, metric_type="gauge")
             
             # Emit payload size distribution
-            emit_metric("cpls.job.payload_bytes", payload_bytes, base_tags, metric_type="distribution")
+            emit_metric("cpls.job.payload_bytes_v2", payload_bytes, base_tags, metric_type="distribution")
             
             # Emit payload size by job type if applicable
             logic = payload.get('logic', '')
@@ -143,9 +143,9 @@ class JobQueue:
                 # Determine if this is voters or proposals based on sources
                 sources = payload.get('sources', [])
                 if 'snapshot' in sources or 'dao_node' in sources:
-                    emit_metric("cpls.refresh.voters.payload_bytes", payload_bytes, base_tags, metric_type="distribution")
+                    emit_metric("cpls.refresh.voters.payload_bytes_v2", payload_bytes, base_tags, metric_type="distribution")
                 if 'eas-atlas' in sources or 'eas-oodao' in sources:
-                    emit_metric("cpls.refresh.proposals.payload_bytes", payload_bytes, base_tags, metric_type="distribution")
+                    emit_metric("cpls.refresh.proposals.payload_bytes_v2", payload_bytes, base_tags, metric_type="distribution")
             
             # Calculate and emit oldest pending job age for this DAO (only PENDING jobs, not completed/failed/etc)
             oldest_age_seconds = self._get_oldest_pending_job_age_seconds(infra_dao_slug)
@@ -248,7 +248,7 @@ class JobQueue:
                             
                             # Emit success metrics
                             emit_job_metric("completed", 1, base_tags)
-                            emit_job_metric("duration_ms", duration_ms, base_tags, metric_type="distribution")
+                            emit_metric("cpls.job.duration_ms_v2", duration_ms, base_tags, metric_type="distribution")
                             emit_job_metric("last_success_timestamp", current_timestamp, base_tags, metric_type="gauge")
                             emit_job_metric("seconds_since_last_success", 0, base_tags, metric_type="gauge")
                             
@@ -434,9 +434,9 @@ class JobQueue:
                     
                     # Determine if this is voters or proposals refresh
                     if source in ['snapshot', 'dao_node']:
-                        emit_metric("cpls.refresh.voters.duration_ms", refresh_duration_ms, base_tags, metric_type="distribution")
+                        emit_metric("cpls.refresh.voters.duration_ms_v2", refresh_duration_ms, base_tags, metric_type="distribution")
                     elif source in ['eas-atlas', 'eas-oodao']:
-                        emit_metric("cpls.refresh.proposals.duration_ms", refresh_duration_ms, base_tags, metric_type="distribution")
+                        emit_metric("cpls.refresh.proposals.duration_ms_v2", refresh_duration_ms, base_tags, metric_type="distribution")
                 
             # Collect stats
             if stats:
@@ -453,7 +453,7 @@ class JobQueue:
         
         # Emit batch size if we have refreshed count
         if total_refreshed > 0:
-            emit_metric("cpls.batch.size", total_refreshed, base_tags, metric_type="distribution")
+            emit_metric("cpls.batch.size_v2", total_refreshed, base_tags, metric_type="distribution")
 
     def get_all_jobs(self) -> 'List[Job]':
         """Get all jobs sorted by creation time"""
