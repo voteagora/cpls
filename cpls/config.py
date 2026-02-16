@@ -26,6 +26,7 @@ INFRA_DAO_SLUGS = INFRA_DAO_SLUGS.split(',')
 RESET_PROPOSALS_ON_RESTART = os.getenv("RESET_PROPOSALS_ON_RESTART", "true").lower() == "true"
 PROPOSAL_CHECK_API_URL = os.getenv("PROPOSAL_CHECK_API_URL", "")
 PROPOSAL_CHECK_SECRET = os.getenv("PROPOSAL_CHECK_SECRET", "")
+DAO_NODE_URL_TEMPLATE = os.getenv("DAO_NODE_URL_TEMPLATE", "https://dao-node-{tenant_namespace}-" + DEPLOYMENT +"-prod.up.railway.app")
 
 PROPOSAL_CHECK_PREFIXES_PROD = {
   "syndicate": "https://www.syndicatecollective.org/",

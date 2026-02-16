@@ -211,8 +211,8 @@ CPLS aggregates proposals from four distinct sources:
 **Supported DAOs:** Optimism, Uniswap, ENS, Scroll, Cyber, and others
 
 **Data Flow:**
-1. Fetch progress from `https://{dao}.prod.agoradata.xyz/v1/progress`
-2. Fetch proposals from `https://{dao}.prod.agoradata.xyz/v1/proposals`
+1. Fetch progress from `https://daonode/v1/progress`
+2. Fetch proposals from `https://daonode/v1/proposals`
 3. For each proposal:
    - Fetch detailed data from `/v1/proposal/{id}`
    - Read votes from PostgreSQL database
@@ -658,7 +658,7 @@ query {
 
 ### DaoNode API
 
-**Base URL:** `https://{dao}.prod.agoradata.xyz/v1/`
+**Base URL:** `https://daonode/v1/`
 
 **Endpoints:**
 - `/progress` - Current indexing progress
