@@ -283,7 +283,7 @@ class Sync:
     
     async def get_nonivotes_vp_at_block(self, block_number):
 
-        url = (DAO_NODE_URL_TEMPLATE % self.infra_dao_slug) + f"/v1/nonivotes/all/at-block/{block_number}"
+        url = DAO_NODE_URL_TEMPLATE.format(tenant_namespace=self.infra_dao_slug) + f"/v1/nonivotes/all/at-block/{block_number}"
 
         
         try:
@@ -302,7 +302,7 @@ class Sync:
 
     async def get_total_nonivotes_vp_at_block(self, block_number):
 
-        url = (DAO_NODE_URL_TEMPLATE % self.infra_dao_slug) + f"/v1/nonivotes/total/at-block/{block_number}"
+        url = DAO_NODE_URL_TEMPLATE.format(tenant_namespace=self.infra_dao_slug) + f"/v1/nonivotes/total/at-block/{block_number}"
 
         try:
             response = await self.http_client.get(url)

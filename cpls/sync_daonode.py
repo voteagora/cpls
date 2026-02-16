@@ -1,9 +1,9 @@
 import copy
 import httpx, time
-import asyncio
 import logging
 from .gcs import GCSClient
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS
+from .config import DAO_NODE_URL_TEMPLATE
 
 from .title_processor import get_title_from_proposal_description
 
@@ -115,25 +115,33 @@ class DaoNodeSync(Sync):
     @daonode_retry
     async def _fetch_progress(self):
         """Fetch current progress from DaoNode API with retry"""
-        response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/progress")
+        url = DAO_NODE_URL_TEMPLATE.format(tenant_namespace=self.infra_dao_slug) + "/v1/progress"
+        response = await self.http_client.get(url)
         return response.json()
 
     @daonode_retry
     async def _fetch_proposals(self):
         """Fetch all proposals from DaoNode API with retry"""
-        response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposals")
+        url = DAO_NODE_URL_TEMPLATE.format(tenant_namespace=self.infra_dao_slug) + "/v1/proposals"
+        response = await self.http_client.get(url)
         return response.json()
 
     @daonode_retry
     async def _fetch_proposal_detail(self, proposal_id):
         """Fetch single proposal detail from DaoNode API with retry"""
-        response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposal/{proposal_id}")
+
+        url = DAO_NODE_URL_TEMPLATE.format(tenant_namespace=self.infra_dao_slug) + "/v1/progress/" + str(proposal_id)
+        response = await self.http_client.get(url)
+
         return response.json()
 
     @daonode_retry
     async def _fetch_proposal_type(self, type_id): # TODO MEMOIZ THIS!!!!!!!!!!
         """Fetch single proposal detail from DaoNode API with retry"""
-        response = await self.http_client.get(f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/proposal_types")
+
+        url = DAO_NODE_URL_TEMPLATE.format(tenant_namespace=self.infra_dao_slug) + "/v1/proposal_types"
+
+        response = await self.http_client.get(url)
         return response.json()['proposal_types'][str(type_id)]
 
     async def read_quorum(self, proposal) -> str:
