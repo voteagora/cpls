@@ -3,12 +3,10 @@ from .gcs import GCSClient
 from .postgres import PostgreSQLClient
 from .blockcache import BlockCacheClient
 
-from .config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY, DATABASE_URL, BLOCKCACHE_URL, load_tenant_config
+from .config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY, DATABASE_URL, BLOCKCACHE_URL, DAO_NODE_URL_TEMPLATE, load_tenant_config
 
 import hashlib
 import json
-import time
-import httpx
 
 FIVE_MINUTES_IN_SECONDS = 5 * 60
 
@@ -284,8 +282,10 @@ class Sync:
             return [dict(r) for r in rows]
     
     async def get_nonivotes_vp_at_block(self, block_number):
-        url = f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/nonivotes/all/at-block/{block_number}"
 
+        url = (DAO_NODE_URL_TEMPLATE % self.infra_dao_slug) + f"/v1/nonivotes/all/at-block/{block_number}"
+
+        
         try:
             response = await self.http_client.get(url)
             if response.status_code == 404:
@@ -301,7 +301,8 @@ class Sync:
             return {}
 
     async def get_total_nonivotes_vp_at_block(self, block_number):
-        url = f"https://{self.infra_dao_slug}.prod.agoradata.xyz/v1/nonivotes/total/at-block/{block_number}"
+
+        url = (DAO_NODE_URL_TEMPLATE % self.infra_dao_slug) + f"/v1/nonivotes/total/at-block/{block_number}"
 
         try:
             response = await self.http_client.get(url)
@@ -412,11 +413,11 @@ if __name__ == "__main__":
     # dns = EASOoDaoSync('jeffdao', reset=True)
     # dns = EASAtlasSync('optimism', reset=True)
 
-    config = load_tenant_config('ens')
+    config = load_tenant_config('optimism')
 
     http_client = create_http_client()
 
-    dns = SnapshotSync('ens', config, reset=True, http_client=http_client)
+    dns = DaoNodeSync('optimism', config, reset=True, http_client=http_client)
 
     gcs_client = GCSClient(GCS_BUCKET_NAME)
 
