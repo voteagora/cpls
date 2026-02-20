@@ -130,7 +130,7 @@ class DaoNodeSync(Sync):
     async def _fetch_proposal_detail(self, proposal_id):
         """Fetch single proposal detail from DaoNode API with retry"""
 
-        url = DAO_NODE_URL_TEMPLATE.format(tenant_namespace=self.infra_dao_slug) + "/v1/progress/" + str(proposal_id)
+        url = DAO_NODE_URL_TEMPLATE.format(tenant_namespace=self.infra_dao_slug) + "/v1/proposal/" + str(proposal_id)
         response = await self.http_client.get(url)
 
         return response.json()
