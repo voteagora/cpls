@@ -263,8 +263,8 @@ class DaoNodeSync(Sync):
 
                 proposal = proposal_data['proposal']
 
-                if 'proposal_type' in proposal:
-                    proposal_type_info = await self._fetch_proposal_type(proposal['proposal_type'])
+                if 'proposal_type_id' in proposal:
+                    proposal_type_info = await self._fetch_proposal_type(proposal['proposal_type_id'])
                     proposal['proposal_type_info'] = proposal_type_info
 
             except Exception as e:
