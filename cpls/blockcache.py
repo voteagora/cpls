@@ -182,7 +182,7 @@ if __name__ == '__main__':
     import asyncio
     loop = asyncio.get_event_loop()
 
-    BLOCKCACHE_URL = f"https://blockcache-production.up.railway.app"
+    # BLOCKCACHE_URL = f"https://blockcache-production.up.railway.app"
     BLOCKCACHE_URL = 'http://0.0.0.0:8002'
     cache = BlockCacheClient(BLOCKCACHE_URL, ALCHEMY_API_KEY)
     # loop.run_until_complete(cache.contract_call_encoded(10, '0xcDF27F107725988f2261Ce2256bDfCdE8B382B10', 143355510, 'votableSupply(uint256)', [143355510]))
