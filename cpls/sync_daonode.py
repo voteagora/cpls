@@ -72,7 +72,7 @@ class DaoNodeSync(Sync):
             vp = int(row['votable_supply'])
             return vp
     
-    async def read_snapshot_votable_supply(self, block_number: int) -> int:
+    async def read_snapshot_votable_supply(self, start_block: int, block_number: str) -> int:
 
         if self.infra_dao_slug == 'optimism':
 
@@ -85,13 +85,24 @@ class DaoNodeSync(Sync):
             votable_supply = await self.bc.votable_supply_at_block_with_oracle(self.gov_addr, block_number)    
             
             if votable_supply == 0:
-                votable_supply = await self.read_snapshot_votable_supply_from_db(block_number)
+                votable_supply = await self.read_snapshot_votable_supply_from_db(start_block)
 
-        elif self.infra_dao_slug in ('scroll', 'cyber', 'uniswap', 'ens'):
+        elif self.infra_dao_slug in ('scroll', 'cyber', 'uniswap', 'ens', 'pguild'):
             # TODO - figure out if this is actually consumed.  It might not be, but should be.  Or it might not be, and doesn't matter because of their special governor.
-            votable_supply = await self.read_snapshot_votable_supply_from_db(block_number)
+            votable_supply = await self.read_snapshot_votable_supply_from_db(start_block)
+        elif self.infra_dao_slug == 'xai':
+            # start block is of mainnet, get the equivalent block on xai
+            # 100 is just an extra measure since we approximate blocks and arb is quite fast
+            # getPastTotalSupply(uint256) is stored on the token contract and doesn't change
+            start_blocktime = await self.get_timestamp(1, start_block)
+            arb_eq_block = await self.bc.last_block_before_timestamp(self.chain_id, start_blocktime)
+            result = await self.bc.contract_call_encoded(
+                self.chain_id, self.token_addr, int(arb_eq_block) + 100,
+                'getPastTotalSupply(uint256)', [start_block]
+            )
+            votable_supply = int(result['result'], 16)
         else:
-            votable_supply = await self.bc.votable_supply_at_block(self.chain_id, self.gov_addr, block_number)   
+            votable_supply = await self.bc.votable_supply_at_block(self.chain_id, self.gov_addr, start_block)
 
         assert votable_supply > 0, "Positive votable supply expected, found something non-positive."
 
@@ -145,7 +156,7 @@ class DaoNodeSync(Sync):
         return response.json()['proposal_types'][str(type_id)]
 
     async def read_quorum(self, proposal) -> str:
-        start_block, proposal_id = proposal['start_block'], proposal['id']
+        start_block, proposal_id, block_number = proposal['start_block'], proposal['id'], proposal['block_number']
 
         if self.infra_dao_slug == 'optimism':
             OPTIMISM_V6_UPGRADE_BLOCK = 114968612  # Block around Jan 18, 2024, the V6 upgrade, could also maybe use 114995000?
@@ -161,7 +172,7 @@ class DaoNodeSync(Sync):
 
                 if not quorum:
                     # Calculate based on 30% of votable supply
-                    votable_supply = await self.read_snapshot_votable_supply(start_block)
+                    votable_supply = await self.read_snapshot_votable_supply(start_block, block_number)
                     quorum = (votable_supply * 30) // 100
 
                 return str(quorum)
@@ -176,7 +187,7 @@ class DaoNodeSync(Sync):
             quorum = int(quorum_result['result'], 16)
             return str(quorum)
         elif self.infra_dao_slug == 'cyber':
-            votable_supply = await self.read_snapshot_votable_supply(start_block)
+            votable_supply = await self.read_snapshot_votable_supply(start_block, block_number)
             quorum = int(votable_supply * 30 / 100) # 30% of votable supply
             return str(votable_supply)
         elif self.infra_dao_slug == 'scroll':
@@ -193,6 +204,25 @@ class DaoNodeSync(Sync):
             token_supply = int(token_supply['result'], 16)
 
             return str(int(token_supply * quorum_pct / 1000000000))
+        elif self.infra_dao_slug == 'xai':
+            # start block is of mainnet, get the equivalent block on xai
+            # 100 is just an extra measure since we approximate blocks and arb is quite fast
+            # quorum(proposalId) is stored on the proposal struct and doesn't change,
+            start_blocktime = await self.get_timestamp(1, start_block)
+            arb_eq_block = await self.bc.last_block_before_timestamp(self.chain_id, start_blocktime)
+            quorum_result = await self.bc.contract_call_encoded(
+                self.chain_id, self.gov_addr, int(arb_eq_block) + 100,
+                'quorum(uint256)', [int(proposal_id)]
+            )
+            quorum = int(quorum_result['result'], 16)
+            return str(quorum)
+        elif self.infra_dao_slug == 'pguild':
+            quorum_result = await self.bc.contract_call_encoded(
+                self.chain_id, self.gov_addr, start_block + 1,
+                'quorum(uint256)', [int(proposal_id)]
+            )
+            quorum = int(quorum_result['result'], 16)
+            return str(quorum)
         else:
             quorum_result = await self.bc.contract_call_encoded(
                 self.chain_id, self.gov_addr, start_block,
@@ -411,13 +441,13 @@ class DaoNodeSync(Sync):
 
             end_block = proposal['end_block']
             proposal['end_blocktime'] = await self.get_timestamp(chain_id, end_block)
-
+            block_number = proposal['block_number']
             print("Quorum set to {}".format(proposal['quorum']))
 
             curtime = int(time.time())
 
             if curtime > start_blocktime:
-                proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block))
+                proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block, block_number))
 
                 if self.delegate_metadata is None:
                     self.delegate_metadata = await self.get_delegate_metadata()
