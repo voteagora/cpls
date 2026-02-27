@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class GCSClient:
-    def __init__(self, bucket_name: str, write_local_copies: bool = WRITE_TO_DISK, local_copy_dir: str = "/Users/jm/code/cpls/data"):
+    def __init__(self, bucket_name: str, write_local_copies: bool = WRITE_TO_DISK, local_copy_dir: str = "/Users/sudheer.t/code/cpls/data"):
         self.bucket_name = bucket_name
         self.client = None
         self.bucket = None
@@ -58,8 +58,15 @@ class GCSClient:
             return
 
         try:
+            # For local debug copies, make extensions match the actual content.
+            # If we're writing text but the blob name ends with ".gz", drop the
+            # ".gz" so local tools don't treat it as compressed.
+            local_name = blob_name
+            if is_text and local_name.endswith('.gz'):
+                local_name = local_name[:-3]
+
             # Create full local path
-            local_path = Path(self.local_copy_dir) / blob_name
+            local_path = Path(self.local_copy_dir) / local_name
 
             # Create parent directories if needed
             local_path.parent.mkdir(parents=True, exist_ok=True)
