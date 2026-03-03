@@ -188,8 +188,9 @@ class DaoNodeSync(Sync):
             return str(quorum)
         elif self.infra_dao_slug == 'cyber':
             votable_supply = await self.read_snapshot_votable_supply(start_block)
-            quorum = int(votable_supply * 30 / 100) # 30% of votable supply
-            return str(votable_supply)
+            # The multiply by 100000 then divide by 1000000000 is for the humans to reason about this.
+            quorum_pct = proposal['proposal_type_info']['quorum'] * 100000
+            return str(int(votable_supply * quorum_pct / 1000000000))
         elif self.infra_dao_slug == 'scroll':
 
             # The multiply by 100000 then divide by 1000000000 is for the humans to reason about this.
