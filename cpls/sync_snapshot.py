@@ -241,7 +241,7 @@ class SnapshotSync(Sync):
 
             proposal['end_blocktime'] = proposal['end']
             proposal['start_blocktime'] = proposal['start']
-
+            proposal['created_blocktime'] = proposal['created']
             if proposal['state'] == 'closed':
                 liveness = 'archived'
             elif proposal['state'] == 'active':

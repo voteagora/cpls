@@ -801,6 +801,7 @@ class EASOoDaoSync(Sync):
 
             proposal['start_blocktime'] = startts
             proposal['end_blocktime'] = endts
+            proposal['created_blocktime'] = int(proposal_meta['created_time'])
 
             proposal['start_block'] = start_block
             proposal['end_block'] = end_block

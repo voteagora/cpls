@@ -442,8 +442,9 @@ class DaoNodeSync(Sync):
 
             end_block = proposal['end_block']
             proposal['end_blocktime'] = await self.get_timestamp(chain_id, end_block)
-            print("Quorum set to {}".format(proposal['quorum']))
+            proposal['created_blocktime'] = await self.get_timestamp(chain_id, int(proposal['block_number']))
 
+            print("Quorum set to {}".format(proposal['quorum']))
             curtime = int(time.time())
 
             if curtime > start_blocktime:

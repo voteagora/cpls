@@ -189,14 +189,16 @@ class EASAtlasSync(Sync):
                 # the caveate, or re-calculate it.
 
                 start_block = proposal['start_block']
-                start_blocktime = await self.get_timestamp(chain_id, start_block)
-                proposal['start_blocktime'] = start_blocktime
-
                 end_block = start_block + 259200 # TODO - the EAS Attestation needs the end-block timestamp.
 
-                proposal['end_block'] = end_block
+                start_blocktime = await self.get_timestamp(chain_id, start_block)
                 end_blocktime = await self.get_timestamp(chain_id, end_block)
+                created_blocktime = await self.get_timestamp(chain_id, proposal['created_block'])
+
+                proposal['end_block'] = end_block
                 proposal['end_blocktime'] = end_blocktime
+                proposal['created_blocktime'] = created_blocktime
+                proposal['start_blocktime'] = start_blocktime
 
                 liveness = 'live'
 
