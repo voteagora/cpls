@@ -193,7 +193,7 @@ class EASAtlasSync(Sync):
 
                 start_blocktime = await self.get_timestamp(chain_id, start_block)
                 end_blocktime = await self.get_timestamp(chain_id, end_block)
-                created_blocktime = await self.get_timestamp(chain_id, proposal['created_block'])
+                created_blocktime = proposal.get('time')
 
                 proposal['end_block'] = end_block
                 proposal['end_blocktime'] = end_blocktime
