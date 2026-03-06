@@ -322,6 +322,14 @@ class DaoNodeSync(Sync):
             proposal['after_start_block'] = proposal['start_block'] > some_pretty_recent_block
             proposal['after_end_block'] = proposal['end_block'] > some_pretty_recent_block
 
+            # Add transaction hash for proposal creation
+            if 'block_number' in proposal and 'transaction_index' in proposal:
+                try:
+                    tx_data = await self.bc.get_transaction_by_index(chain_id, proposal['block_number'], proposal['transaction_index'])
+                    proposal['transaction_hash'] = tx_data['tx']
+                except Exception as e:
+                    print(f"Failed to get transaction hash for block {proposal['block_number']}, index {proposal['transaction_index']}: {e}")
+
             try:
                 proposal_hash = self.check_existing_proposal_hash(proposal, existing_proposal_hash)
             except SkipProposal as e:
@@ -492,15 +500,30 @@ class DaoNodeSync(Sync):
             }"""
 
             if 'queue_event' in proposal:
+                try:
+                    tx_data = await self.bc.get_transaction_by_index(chain_id, proposal['queue_event']['block_number'], proposal['queue_event']['transaction_index'])
+                    proposal['queue_event']['transaction_hash'] = tx_data['tx']
+                except Exception as e:
+                    print(f"Failed to get transaction hash for queue event: {e}")
                 proposal['queue_event']['timestamp'] = await self.get_timestamp(chain_id, proposal['queue_event']['block_number'])
                 proposal['lifecycle_stage'] = 'QUEUED'
 
             if 'cancel_event' in proposal:
+                try:
+                    tx_data = await self.bc.get_transaction_by_index(chain_id, proposal['cancel_event']['block_number'], proposal['cancel_event']['transaction_index'])
+                    proposal['cancel_event']['transaction_hash'] = tx_data['tx']
+                except Exception as e:
+                    print(f"Failed to get transaction hash for cancel event: {e}")
                 proposal['cancel_event']['timestamp'] = await self.get_timestamp(chain_id, proposal['cancel_event']['block_number'])
                 proposal['lifecycle_stage'] = 'CANCELLED'
                 liveness = 'archived'
 
             if 'execute_event' in proposal:
+                try:
+                    tx_data = await self.bc.get_transaction_by_index(chain_id, proposal['execute_event']['block_number'], proposal['execute_event']['transaction_index'])
+                    proposal['execute_event']['transaction_hash'] = tx_data['tx']
+                except Exception as e:
+                    print(f"Failed to get transaction hash for execute event: {e}")
                 proposal['execute_event']['timestamp'] = await self.get_timestamp(chain_id, proposal['execute_event']['block_number'])
                 proposal['lifecycle_stage'] = 'EXECUTED'
                 liveness = 'archived'
