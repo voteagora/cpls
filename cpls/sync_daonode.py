@@ -75,14 +75,12 @@ class DaoNodeSync(Sync):
     async def read_snapshot_votable_supply(self, block_number: int) -> int:
 
         if self.infra_dao_slug == 'optimism':
-
             # Optimism had a gov upgrade sometime between Jan 8 and Jan 18, 2018.  Jeff can't find the transaction, gave up.
             # What we do here, is trust the oracle when we can, because it's much faster and more accurate.
-
+            #
             # And then, when we can't, we fall back on the IVotes, but the query is painfully slow and getting worse with time.
             # Hopefully, we can actually switch to not resetting the archives on boot, once things are stable.
-
-            votable_supply = await self.bc.votable_supply_at_block_with_oracle(self.gov_addr, block_number)    
+            votable_supply = await self.bc.votable_supply_at_block_with_oracle(self.chain_id, self.gov_addr, block_number)
             
             if votable_supply == 0:
                 votable_supply = await self.read_snapshot_votable_supply_from_db(block_number)
@@ -167,23 +165,22 @@ class DaoNodeSync(Sync):
         start_block, proposal_id = proposal['start_block'], proposal['id']
 
         if self.infra_dao_slug == 'optimism':
-            OPTIMISM_V6_UPGRADE_BLOCK = 114968612  # Block around Jan 18, 2024, the V6 upgrade, could also maybe use 114995000?
-            if start_block < OPTIMISM_V6_UPGRADE_BLOCK:
-                return '0' 
-            else:
-                # Get quorum from contract
-                quorum_result = await self.bc.contract_call_encoded(
-                    10, self.gov_addr, start_block,
-                    'quorum(uint256)', [int(proposal_id)]
-                )
-                quorum = int(quorum_result['result'], 16)
+            if self.chain_id == 10:
+                OPTIMISM_V6_UPGRADE_BLOCK = 114968612
+                if start_block < OPTIMISM_V6_UPGRADE_BLOCK:
+                    return '0'
+            
+            quorum_result = await self.bc.contract_call_encoded(
+                self.chain_id, self.gov_addr, start_block,
+                'quorum(uint256)', [int(proposal_id)]
+            )
+            quorum = int(quorum_result['result'], 16)
 
-                if not quorum:
-                    # Calculate based on 30% of votable supply
-                    votable_supply = await self.read_snapshot_votable_supply(start_block)
-                    quorum = (votable_supply * 30) // 100
+            if not quorum:
+                votable_supply = await self.read_snapshot_votable_supply(start_block)
+                quorum = (votable_supply * 30) // 100
 
-                return str(quorum)
+            return str(quorum)
 
         elif self.infra_dao_slug == 'uniswap':
             return '40000000000000000000000000'
@@ -279,7 +276,7 @@ class DaoNodeSync(Sync):
                                             '93130602819908532473848485978098796990674863592354853213212538759313310336867',
                                             '5175595760171612200408949420975407216083057654091817591016459682460740751015',
                                             '72547624684064576177895562376757402078028471363448110831794825138702111216488']
-
+            ## last proposal above is a dev proposal id - some issue with hybrid proposal.
 
             OPTIMISM_TEST_PROPOSALS = ['90839767999322802375479087567202389126141447078032129455920633707568400402209',
                                         '28601282374834906210319879956567232553560898502158891728063939287236508034960',
@@ -295,7 +292,6 @@ class DaoNodeSync(Sync):
                 print(e)
                 skipped_count += 1
                 continue
-
 
             try:
                 proposal_data = await self._fetch_proposal_detail(proposal_info['id'])
@@ -318,14 +314,17 @@ class DaoNodeSync(Sync):
             
             if hybrid:
                 govless_proposal_blob_name = self.govless_proposal_blob_name(mapping[proposal_id])
-                proposal['govless_proposal'] = await gcs_client.read_dict(govless_proposal_blob_name)
+                try:
+                    proposal['govless_proposal'] = await gcs_client.read_dict(govless_proposal_blob_name)
 
-
-                if proposal['govless_proposal']:
-                    # TODO - any other keys that can be deleted?
-                    for key in ['title', 'description']:
-                        if key in proposal['govless_proposal']:
-                            del proposal['govless_proposal'][key]
+                    if proposal['govless_proposal']:
+                        for key in ['title', 'description']:
+                            if key in proposal['govless_proposal']:
+                                del proposal['govless_proposal'][key]
+                except Exception as e:
+                    print(f"Skipping hybrid proposal {proposal_id}: eas-atlas data not yet available ({govless_proposal_blob_name})")
+                    skipped_count += 1
+                    continue
 
             # These are needed for cache busting.
             proposal['after_start_block'] = proposal['start_block'] > some_pretty_recent_block
@@ -596,7 +595,7 @@ class DaoNodeSync(Sync):
                     stage = encoded_state['result']
 
                     BLOCK_AROUND_TIME_WHEN_PROPOSALS_STARTED_GETTING_BORKED = 126449975
-                    if self.infra_dao_slug == 'optimism' and (proposal['end_block'] <= BLOCK_AROUND_TIME_WHEN_PROPOSALS_STARTED_GETTING_BORKED):
+                    if self.infra_dao_slug == 'optimism' and self.chain_id == 10 and (proposal['end_block'] <= BLOCK_AROUND_TIME_WHEN_PROPOSALS_STARTED_GETTING_BORKED):
 
                         SOME_BLOCK_IN_2025 = 142917636
 
