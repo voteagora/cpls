@@ -173,6 +173,14 @@ class BlockCacheClient:
 
         return vs
 
+    @http_retry
+    async def get_transaction_by_index(self, chain_id, block_number, transaction_index):
+        headers = self.headers()
+        url = self.base_url + f"/transaction/{chain_id}/{block_number}/{transaction_index}"
+        resp = await self.client.get(url, headers=headers)
+        resp.raise_for_status()
+        return resp.json()
+
     
 if __name__ == '__main__':
 
