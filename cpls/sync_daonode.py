@@ -354,7 +354,8 @@ class DaoNodeSync(Sync):
             reuse_tally = existing_num_of_votes > 0 and (existing_num_of_votes == num_of_votes) and (not self.reset)
 
             start_block = proposal['start_block']
-            start_blocktime = await self.get_timestamp(chain_id, start_block)
+            timestamp_chain_id = 1 if self.infra_dao_slug == 'xai' else chain_id
+            start_blocktime = await self.get_timestamp(timestamp_chain_id, start_block)
             proposal['start_blocktime'] = start_blocktime
 
             approval = proposal['voting_module_name'] == 'approval'
@@ -451,8 +452,9 @@ class DaoNodeSync(Sync):
             proposal['quorum'] = await self.read_quorum(proposal)
 
             end_block = proposal['end_block']
-            proposal['end_blocktime'] = await self.get_timestamp(chain_id, end_block)
-            proposal['created_blocktime'] = await self.get_timestamp(chain_id, int(proposal['block_number']))
+            timestamp_chain_id = 1 if self.infra_dao_slug == 'xai' else chain_id
+            proposal['end_blocktime'] = await self.get_timestamp(timestamp_chain_id, end_block)
+            proposal['timestamp'] = await self.get_timestamp(chain_id, int(proposal['block_number']))
 
             print("Quorum set to {}".format(proposal['quorum']))
             curtime = int(time.time())
