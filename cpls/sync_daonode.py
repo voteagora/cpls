@@ -449,7 +449,14 @@ class DaoNodeSync(Sync):
             # service hasn't completed its first loop yet.
             # So, this is a bit of a tradeoff, and less precise, but easier -- for most DAOs.
             # I think it breaks for ENS, but that's it(?)
-            proposal['quorum'] = await self.read_quorum(proposal)
+
+            # Try to read quorum, but handle errors (e.g., cancelled proposals cause contract reverts)
+            try:
+                proposal['quorum'] = await self.read_quorum(proposal)
+            except Exception as e:
+                is_cancelled = 'cancel_event' in proposal
+                print(f"Failed to read quorum for proposal {proposal['id']} (cancelled={is_cancelled}): {e}")
+                proposal['quorum'] = '0'
 
             end_block = proposal['end_block']
             timestamp_chain_id = 1 if self.infra_dao_slug == 'xai' else chain_id
@@ -459,14 +466,22 @@ class DaoNodeSync(Sync):
             print("Quorum set to {}".format(proposal['quorum']))
             curtime = int(time.time())
 
+            # Try to read voting power, but handle errors (e.g., cancelled proposals cause contract reverts)
             if curtime > start_blocktime:
-                proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block))
+                try:
+                    proposal['total_voting_power_at_start'] = str(await self.read_snapshot_votable_supply(start_block))
+                except Exception as e:
+                    is_cancelled = 'cancel_event' in proposal
+                    print(f"Failed to read voting power for proposal {proposal['id']} (cancelled={is_cancelled}): {e}")
+                    proposal['total_voting_power_at_start'] = '0'
 
                 if self.delegate_metadata is None:
                     self.delegate_metadata = await self.get_delegate_metadata()
 
                 if not reuse_tally:
-                    snapshot_vp = await self.get_vp_snapshot_all_delegates(start_block, gcs_client)
+                    # For xai, we need to add 1037600 blocks to the proposal block number. start_block is of mainnet.
+                    vp_snapshot_block = int(proposal['block_number']) + 1037600 if self.infra_dao_slug == 'xai' else start_block
+                    snapshot_vp = await self.get_vp_snapshot_all_delegates(vp_snapshot_block, gcs_client)
 
                     snapshot_vp_out = []
                     for row in snapshot_vp:
