@@ -33,3 +33,4 @@ service-account-key.json
 Thumbs.db
 
 .python-version
+.coverage
