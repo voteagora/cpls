@@ -3,6 +3,27 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--update-fixtures",
+        action="store_true",
+        default=False,
+        help="Regenerate golden proposal fixtures from live GCS data",
+    )
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "gcs: mark test as requiring real GCS credentials (skipped if unauthenticated)",
+    )
+
+
+@pytest.fixture
+def update_fixtures(request):
+    return request.config.getoption("--update-fixtures")
+
+
 @pytest.fixture
 def sample_tenant_config():
     """A minimal tenant config matching the YAML structure."""
