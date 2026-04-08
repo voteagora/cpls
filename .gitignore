@@ -18,6 +18,9 @@ ENV/
 *.json
 service-account-key.json
 
+# But keep test fixtures
+!tests/fixtures/**/*.json
+
 # IDE
 .vscode/
 .idea/

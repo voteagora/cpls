@@ -1,7 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-import asyncio
-
+from unittest.mock import AsyncMock, MagicMock
 
 def pytest_addoption(parser):
     parser.addoption(

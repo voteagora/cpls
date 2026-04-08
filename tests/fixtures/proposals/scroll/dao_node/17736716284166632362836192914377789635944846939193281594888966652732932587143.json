@@ -1,0 +1,85 @@
+{
+  "after_end_block": false,
+  "after_start_block": false,
+  "block_number": "20421963",
+  "data_eng_properties": {
+    "hash": "34a4cbcb7749ab0afe7b0b4c4581b54ef9fa5e9b434655cdc42193adde580e53",
+    "liveness": "archived",
+    "source": "dao_node"
+  },
+  "decoded_proposal_data": [
+    [
+      [
+        0,
+        [],
+        [],
+        [],
+        "9Summits"
+      ],
+      [
+        0,
+        [],
+        [],
+        [],
+        "Avantgarde"
+      ],
+      [
+        0,
+        [],
+        [],
+        [],
+        "kpk"
+      ]
+    ],
+    [
+      1,
+      1,
+      "0x0000000000000000000000000000000000000000",
+      1,
+      0
+    ]
+  ],
+  "description": "# DAO Treasury Management RFP\n\n## Overview\nEarlier in August, a [proposal was posted](https://forum.scroll.io/t/request-for-proposals-dao-treasury-management/1047 on the Scroll governance forum outlining a request for proposals for treasury management. \n\nThree responses came in:\n* [9Summits](https://forum.scroll.io/t/request-for-proposals-dao-treasury-management/1047/4)\n* [Avantgarde](https://forum.scroll.io/t/request-for-proposals-dao-treasury-management/1047/5)\n* [kpk](https://forum.scroll.io/t/request-for-proposals-dao-treasury-management/1047/8)\n\nThere was more information shared in 1-1 calls with Avant Garde and kpk, which can be found [here](https://forum.scroll.io/t/call-links-2025-june-onward/822).\n\nThis proposal is about choosing a service provider based on the information provided to date. Additional negotiations can take place with the provider that is voted on. \n\n## Request for Proposal\nThe governance team invites **qualified service providers** to submit proposals to support the DAO in developing a robust treasury management strategy for the [DAO treasury](https://scrollscan.com/address/0x4cb06982dD097633426cf32038D9f1182a9aDA0c). We are particularly interested in teams with demonstrated experience managing on-chain assets, supporting DAO governance processes, and designing transparent, risk-aware financial systems.\n\nThis is an opportunity to help shape Scroll\u2019s financial future - not just by managing assets, but by co-designing the frameworks and tools that will support long-term sustainability, decentralization, and protocol alignment.\n\nWe welcome proposals from:\n\n* Treasury management companies/DAOs\n* On-chain risk and financial modeling teams\n* DAO-native strategists and financial consultants\n* Service providers with experience in tooling\n\nAll proposals will be reviewed by the Foundation and the DAO. Qualified teams may present their proposal publicly on [governance calls](https://calendar.google.com/calendar/u/0/embed?src=c_5c62db9ba29ec8b39ab7be1bbc750b333c554bb144f5bab28cefa55bfa4a84b3@group.calendar.google.com&ctz=America/New_York) and/or take part in a pilot program or deeper scoping round.\n\nAll submitted proposals will be evaluated based on the following criteria:\n\n1. Strategic fit: alignment with Scroll DAO\u2019s mission & [values](https://scroll.io/gov-docs/content/our-governance-philosophy).\n2. Relevant experience\n3. Treasury & risk management approach\n4. Tooling\n5. Cost\n6. Willingness to potentially work alongside other service providers\n7. Commitment to consistent public reporting (with an outline of the frequency / nature of updates)\n\n---\n\n### Submission Guidelines\n\n**Who can apply:**\nTreasury management companies/DAOs, on-chain risk and financial modeling teams, DAO-native strategists and financial consultants as well as service providers with experience in tooling.\n\n**What to include:**\n\n* Overview of your team and relevant DAO experience\n* Description of proposed services\n* Tooling or protocol integrations\n* Pricing\n* Risk frameworks and assumptions\n* Reporting cadence (examples from other work is helpful)\n* Disclosure of conflicts of interest (including any existing relationships with or investments from Scroll DAO delegates)\n* Case studies (examples from your work in other DAOs)> \n\n> **Proposal Deadline:** Mon August 18th, 2025 at midnight UTC-8.\n\n---\n\n### Community Feedback\n\nThe DAO community brought up the following points as well:\n\n* Bear market preparedness\n* Having a stable coin balance to pay for grants or service providers / to minimize downward sell pressure\n* Integration plans with DVT or similar technologies\n* Slashing insurance\n* Transparent operator composition (ideally including DAO-aligned node runners)\n\n## 9Summits\n**Overview of our Team and Relevant DAO Experience**\n\n9summits is a curation company specializing in on-chain risk management and market-neutral strategies. Founded by R\u00e9mi, the company is currently curating over $85 million in various market-neutral strategies. One of the existing clients is Ethereum France which showcases strong performance, successful multi-year track record and auditable experience in DAO treasury management.\n\n**Description of Proposed Services**\n\nFor Scroll DAO, 9summits proposes to design and implement a long-term treasury management strategy that begins with a comprehensive audit of current assets and a clear understanding on the DAO\u2019s missions. This will be followed by the creation of an allocation plan that matches Scroll DAO\u2019s targets. The approach will secure the DAO\u2019s capacity to fund grants, operations, and ecosystem programs while minimizing the risk of downward sell pressure during market downturns. Throughout the engagement, we will provide continuous monitoring of the treasury\u2019s health using on-chain analytics and real-time alerts, while ensuring that all major treasury decisions are presented and discussed with the community before execution.\n\nThe rest of their response is [here](https://forum.scroll.io/t/request-for-proposals-dao-treasury-management/1047/4). \n\n## Avantgarde\nProposed Services: Holistic Treasury Management\n\nIn the months leading up to the RFP, we\u2019ve had numerous conversations with delegates in the Scroll DAO to better understand how delegates would like to see the treasury being managed and utilized. This proposal is built on the feedback we got, and is our invitation to a strategic partnership to bring holistic management to the DAO\u2019s treasury.\n\nThe outlined approach addresses the DAO\u2019s key objectives\u2014**extending the runway, mitigating risk, and ensuring a stable financial foundation for funding programs and contributors** for years to come\u2014but also aims to **foster activity and growth within the Scroll DeFi** ecosystem through strategic asset allocation and protocol deployments, to align treasury actions with the DAO\u2019s broader strategic goals. The proposed partnership will be founded on transparent operational processes and accounting to provide not only **a clear overview and point of contact for the DAO\u2019s finances**, but also the necessary **financial context to make strategic decisions and structuring actionable financial plans** for the DAO, whether it\u2019s grants programs or other growth initiatives.\n\nWe would look to work closely with the DAO (or possibly the newly proposed Execution Oversight Council) to ensure that the deployed strategies accurately reflects the DAO\u2019s current risk tolerance and overall objectives, and with the DAO\u2019s input outline a treasury management policy framework to guide the mandate (such as the % of funds earmarked for the different strategic parts). Lastly, we are not opposed to collaborating with other service providers, if that is what the DAO prefers.\n\nThe rest of the proposal can be found [here](https://forum.scroll.io/t/request-for-proposals-dao-treasury-management/1047/4).\n\n## kpk\nSummary\nThis proposal outlines a collaboration between kpk and Scroll, focused on managing Scroll\u2019s Treasury.\n\nIf approved, kpk will non-custodially manage ~20M SCR before Oct-2025 and ~20M additional SCR once they are unlocked in October. The treasury will gradually diversify by accumulating stablecoins through strategies defined by kpk\u2019s research team, within our strict risk-management framework. This will allow Scroll to extend its runway and cover its expenses without selling SCR, increasing the capability of the treasury to fund future initiatives and retribute its contributors with stablecoins.\n\nScroll DAO retains the right to terminate this agreement through its governance mechanism.\n\nThe rest of the proposal can be found [here](https://forum.scroll.io/t/request-for-proposals-dao-treasury-management/1047/8).",
+  "end_block": 20997963,
+  "end_blocktime": 1757561275,
+  "hybrid": false,
+  "id": "17736716284166632362836192914377789635944846939193281594888966652732932587143",
+  "lifecycle_stage": "SUCCEEDED",
+  "log_index": 1,
+  "num_of_votes": 97,
+  "proposal_data": "00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000002e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083953756d6d697473000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a4176616e74676172646500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000036b706b0000000000000000000000000000000000000000000000000000000000",
+  "proposal_type_id": 10,
+  "proposal_type_info": {
+    "approval_threshold": 7600,
+    "module": null,
+    "name": "Change token implementation - Approval Voting",
+    "quorum": 16,
+    "scopes": []
+  },
+  "proposer": "0x2b2a8546df3b23535fffd75b4e312f3c5c7b4351",
+  "quorum": "1599999999999999865782272",
+  "start_block": 20594763,
+  "start_blocktime": 1756959887,
+  "timestamp": 1756689961,
+  "title": "DAO Treasury Management RFP",
+  "total_voting_power_at_start": "5735165052486236798091200",
+  "totals": {
+    "0": {
+      "1": "108752138198854100532"
+    },
+    "1": {
+      "1": "1579646916683153686805194"
+    },
+    "2": {
+      "1": "227118326157402020422438"
+    },
+    "no-param": {
+      "1": "1806873994978754561328164",
+      "2": "614918476319895673775190"
+    }
+  },
+  "transaction_hash": "0xc33f84fd1f86cbe63137e52f7e377578d97d7a95bac08c4982f2a4dce1a8ea81",
+  "transaction_index": 0,
+  "voting_module": "0xe5baf6359d200c144a9e52e3361efa6dc5780cc9",
+  "voting_module_name": "approval"
+}
