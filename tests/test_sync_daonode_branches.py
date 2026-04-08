@@ -208,11 +208,11 @@ class TestProposalFetchFailure:
         assert result["refreshed"] == 0
 
 
-class TestHybridGCSReadFailure:
+class TestHybridGCSReadReturnsNone:
 
     @pytest.mark.asyncio
-    async def test_hybrid_gcs_read_failure_skips_proposal(self, mock_gcs):
-        """Lines 324-327: exception reading govless hybrid proposal → skip."""
+    async def test_hybrid_govless_none_still_processes(self, mock_gcs):
+        """Lines 319-328: hybrid proposal whose govless GCS data is None is still refreshed."""
         sync, mock_http, mock_bc, mock_conn = make_daonode_sync(OPTIMISM_CONFIG)
         past = int(time.time()) - 7200
         mock_bc.get_blocktime = AsyncMock(return_value=past)
@@ -231,14 +231,14 @@ class TestHybridGCSReadFailure:
         }}
 
         mock_http.get = AsyncMock(side_effect=[progress_resp, proposals_resp, detail_resp])
-        mock_gcs.read_dict = AsyncMock(side_effect=Exception("GCS unavailable"))
+        # read_dict returns None (govless data not found); proposal should still be refreshed
 
         # Patch read_govless_proposal_mappings so proposal 99003 maps to a govless proposal
         with patch.object(sync, 'read_govless_proposal_mappings',
                           new=AsyncMock(return_value={"99003": "govless-1"})):
             result = await sync.refresh_list(mock_gcs)
 
-        assert result["skipped"] == 1
+        assert result["refreshed"] == 1
 
 
 class TestHashUnchangedSkip:

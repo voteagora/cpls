@@ -135,7 +135,8 @@ class TestReuseTallyPath:
         """Lines 119-124: when vote count matches, reuse existing outcome from GCS."""
         sync, mock_bc, mock_conn = atlas_sync
 
-        mock_bc.get_decoded_eas = AsyncMock(return_value=make_attestation("p-reuse", "STANDARD"))
+        att = make_attestation("p-reuse", "STANDARD")
+        mock_bc.get_decoded_eas = AsyncMock(side_effect=lambda c, u: att if c == 10 else None)
         past = int(time.time()) - 7200
         mock_bc.get_blocktime = AsyncMock(return_value=past)
 
@@ -224,7 +225,7 @@ class TestHashUnchangedSkip:
         sync.reset = False
 
         att = make_attestation("p-same", "STANDARD")
-        mock_bc.get_decoded_eas = AsyncMock(return_value=att)
+        mock_bc.get_decoded_eas = AsyncMock(side_effect=lambda c, u: att if c == 10 else None)
         past = int(time.time()) - 7200
         mock_bc.get_blocktime = AsyncMock(return_value=past)
 
@@ -310,7 +311,7 @@ class TestCitizensS9BlockRange:
         att = make_attestation("p-s9")
         att["attestation"]["start_block"] = S9_BLOCK_NUMBER  # at or above S9 threshold
         att["decoded_data"]["start_block"] = S9_BLOCK_NUMBER
-        mock_bc.get_decoded_eas = AsyncMock(return_value=att)
+        mock_bc.get_decoded_eas = AsyncMock(side_effect=lambda c, u: att if c == 10 else None)
         past = int(time.time()) - 7200
         mock_bc.get_blocktime = AsyncMock(return_value=past)
 
@@ -380,7 +381,7 @@ class TestCitizensBranchNonOp10:
 
             att = make_attestation("p-chain1", "STANDARD")
             att["chain_id"] = 1
-            mock_bc.get_decoded_eas = AsyncMock(return_value=att)
+            mock_bc.get_decoded_eas = AsyncMock(side_effect=lambda c, u: att if c == 1 else None)
             past = int(time.time()) - 7200
             mock_bc.get_blocktime = AsyncMock(return_value=past)
 

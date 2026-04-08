@@ -129,8 +129,9 @@ class TestEASAtlasRefreshListNew:
         mock_gcs_client.get_blob = AsyncMock(return_value=mock_blob)
         mock_gcs_client.list_blobs = AsyncMock(return_value=[])
 
-        # Attestation from BlockCache
-        mock_bc.get_decoded_eas = AsyncMock(return_value=make_attestation("eas-prop-1", "STANDARD"))
+        # Attestation from BlockCache — return None for chain_id=1 so only chain_id=10 processes
+        att = make_attestation("eas-prop-1", "STANDARD")
+        mock_bc.get_decoded_eas = AsyncMock(side_effect=lambda c, u: att if c == 10 else None)
 
         # Blocktimes: proposal ended in the past
         past = int(time.time()) - 7200
@@ -172,7 +173,8 @@ class TestEASAtlasRefreshListSkipArchived:
 
         mock_conn.fetch = AsyncMock(side_effect=multi_fetch)
 
-        mock_bc.get_decoded_eas = AsyncMock(return_value=make_attestation("eas-prop-1"))
+        att = make_attestation("eas-prop-1")
+        mock_bc.get_decoded_eas = AsyncMock(side_effect=lambda c, u: att if c == 10 else None)
 
         # GCS: proposal exists and is archived
         mock_blob = MagicMock()
@@ -239,7 +241,8 @@ class TestEASAtlasApprovalVotes:
 
         mock_conn.fetch = AsyncMock(side_effect=multi_fetch)
 
-        mock_bc.get_decoded_eas = AsyncMock(return_value=make_attestation("eas-approval-1", "APPROVAL"))
+        att = make_attestation("eas-approval-1", "APPROVAL")
+        mock_bc.get_decoded_eas = AsyncMock(side_effect=lambda c, u: att if c == 10 else None)
         past = int(time.time()) - 7200
         mock_bc.get_blocktime = AsyncMock(return_value=past)
 
