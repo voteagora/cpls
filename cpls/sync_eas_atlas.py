@@ -7,7 +7,7 @@ import copy
 from .gcs import GCSClient
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS
 
-from .title_processor import get_title_from_proposal_description
+from .title_processor import get_title_from_proposal_description, strip_leading_undefined
 
 from .config import ALCHEMY_API_KEY
 
@@ -105,6 +105,7 @@ class EASAtlasSync(Sync):
                     skipped_count += 1
                     continue
 
+                proposal['description'] = strip_leading_undefined(proposal['description'])
                 proposal['title'] = get_title_from_proposal_description(proposal['description'])
                 proposal['proposer_ens'] = await self.bc.get_ens(proposal['proposer'])
 

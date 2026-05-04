@@ -5,7 +5,7 @@ from .gcs import GCSClient
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS
 from .config import DAO_NODE_URL_TEMPLATE
 
-from .title_processor import get_title_from_proposal_description
+from .title_processor import get_title_from_proposal_description, strip_leading_undefined
 
 from tenacity import (
     retry,
@@ -430,6 +430,7 @@ class DaoNodeSync(Sync):
 
                 await self.overwrite_votes(votes_out + govless_votes, proposal_id, gcs_client)
 
+            proposal['description'] = strip_leading_undefined(proposal['description'])
             proposal['title'] = get_title_from_proposal_description(proposal['description'])
 
             liveness = 'live'

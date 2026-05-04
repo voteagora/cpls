@@ -1,5 +1,12 @@
 import re
 
+
+def strip_leading_undefined(description: str | None) -> str:
+    if not description:
+        return description or ""
+    return re.sub(r"^undefined[\s\r\n]*", "", description)
+
+
 def extract_title(body: str | None) -> str | None:
     if not body:
         return None
