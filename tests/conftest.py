@@ -10,13 +10,6 @@ def pytest_addoption(parser):
     )
 
 
-def pytest_configure(config):
-    config.addinivalue_line(
-        "markers",
-        "gcs: mark test as requiring real GCS credentials (skipped if unauthenticated)",
-    )
-
-
 @pytest.fixture
 def update_fixtures(request):
     return request.config.getoption("--update-fixtures")
