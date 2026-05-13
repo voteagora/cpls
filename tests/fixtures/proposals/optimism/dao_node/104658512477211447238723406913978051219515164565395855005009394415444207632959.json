@@ -4,7 +4,7 @@
   "block_number": "138893255",
   "data_eng_properties": {
     "hash": "2f49492949c2d552833198544bac2ef4629d4622028ae35dafd4af233a7e8092",
-    "liveness": "archived",
+    "liveness": "live",
     "source": "dao_node"
   },
   "decoded_proposal_data": [
