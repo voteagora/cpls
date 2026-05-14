@@ -1,0 +1,62 @@
+{
+  "after_end_block": false,
+  "after_start_block": false,
+  "block_number": "15018163",
+  "calldatas": [
+    ""
+  ],
+  "data_eng_properties": {
+    "hash": "8b5a4b055c3a8df45d09cecc82b5944df3ad28de0f13399158b002b435c436c2",
+    "liveness": "live",
+    "source": "dao_node"
+  },
+  "description": "# Setting CYBER Staking Incentives for Q2 2025\n\n**Executive Summary**\n\nThis proposal sets forth the CYBER staking incentives for Q2 2025, covering the period from **April 1 to June 30, 2025**. The goal is to continue offering competitive rewards to CYBER stakers while ensuring the long-term sustainability of the incentive program.\n\nAs outlined in the Mainnet Staking announcement, CyberDAO is responsible for determining staking rewards through DAO governance. This proposal recommends **maintaining the staking incentive allocation at 250,000 CYBER for Q2**, consistent with the previous quarter.\n\nBased on current staking participation levels, this allocation is projected to result in an **annual percentage yield (APY) of approximately 30%**, keeping CYBER highly competitive in the current market environment.\n\n---\n\n**Motivation**\n\nThis proposal reaffirms CyberDAO\u2019s role in setting staking incentives and ensures that staking rewards continue to be aligned with market conditions and community expectations.\n\nMaintaining the total reward pool at 250k CYBER for Q2 strikes a balance between offering meaningful incentives for stakers and preserving treasury resources for future quarters.\n\n---\n\n**Specifications**\n\n\u2022\t**Staking Incentives Allocation:** 250,000 CYBER\n\n\u2022\t**Incentive Period:** April 1 \u2013 June 30, 2025 (Q2)\n\n\u2022\t**Projected APY:** ~30% (subject to change based on total staked CYBER)\n\nThis rate places CYBER among the most competitive staking opportunities compared to other networks. The APY projection is based on current levels of active staked CYBER and is designed to reward long-term participation while encouraging new users to stake.\n\nWhile staking activity tends to fluctuate with market conditions, maintaining a strong reward rate helps anchor economic security for the network and reinforces alignment between the protocol and its active community.\n\n---\n\n**Success Criteria**\n\n\u2022\t**Sustained Stake Ratio:** Maintain or improve upon the current stake ratio (the percentage of CYBER\u2019s circulating supply that is actively staked).\n\n\u2022\t**Community Participation:** Continued engagement from stakers and delegates in governance.\n\n\u2022\t**Economic Alignment:** Ensure staking remains an attractive option without overextending the community treasury.\n\n---\n\n**Conclusion**\n\nThis proposal aims to maintain the staking momentum built in previous quarters by offering a competitive reward rate while preserving the long-term sustainability of the program. By keeping the staking incentive at **250k CYBER**, CyberDAO continues to demonstrate its commitment to economic alignment, active governance, and responsible treasury management.",
+  "end_block": 15406963,
+  "end_blocktime": 1744242493,
+  "hybrid": false,
+  "id": "51864681802578431055051774372360255768364008881797769364315800242780425500096",
+  "lifecycle_stage": "QUEUED",
+  "log_index": 0,
+  "num_of_votes": 27,
+  "proposal_type_id": 0,
+  "proposal_type_info": {
+    "approval_threshold": 5100,
+    "module": null,
+    "name": "\"Community Treasury\"",
+    "quorum": 500,
+    "scopes": []
+  },
+  "proposer": "0xebed0bf2701e905b4c576b3dc943d797bac226ed",
+  "queue_event": {
+    "block_number": "16157352",
+    "eta": 1745872871,
+    "id": "51864681802578431055051774372360255768364008881797769364315800242780425500096",
+    "log_index": 1,
+    "timestamp": 1745743271,
+    "transaction_hash": "0xd3a067fb028b35b821d0293d1f760b63cb9b01ff17941a8a754b65b9315ea6d7",
+    "transaction_index": 1
+  },
+  "quorum": "39896634720078136344576",
+  "signatures": [
+    ""
+  ],
+  "start_block": 15104563,
+  "start_blocktime": 1743637693,
+  "targets": [
+    "0x58e53131c339aa3cba35904538ea5948f751050a"
+  ],
+  "timestamp": 1743464893,
+  "title": "Setting CYBER Staking Incentives for Q2 2025",
+  "total_voting_power_at_start": "797932694401562677748597",
+  "totals": {
+    "no-param": {
+      "1": "365647633981654006077797"
+    }
+  },
+  "transaction_hash": "0x3fd3a1ae4655a80965d51b7314677864d5e3252b3cdc9d54df86569d6e659218",
+  "transaction_index": 1,
+  "values": [
+    0
+  ],
+  "voting_module_name": "standard"
+}
