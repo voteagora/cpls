@@ -157,7 +157,7 @@ class JobQueue:
             emit_event("job.queued", {**base_fields, "payload_bytes": payload_bytes})
             self._emit_queue_snapshot(infra_dao_slug)
 
-            logger.debug("Job queued", extra={
+            logger.info("Job queued", extra={
                 "extra_fields": {
                     "job_id": job_id,
                     "infra_dao_slug": infra_dao_slug,
@@ -183,7 +183,7 @@ class JobQueue:
         while self.processing:
             try:
                 job = await self.queue.get()
-                logger.debug("Worker got job", extra={
+                logger.info("Worker got job", extra={
                     "extra_fields": {
                         "worker_id": worker_id,
                         "job_id": job.id
@@ -302,7 +302,7 @@ class JobQueue:
                                     }
                                 })
 
-                            logger.debug("Worker finished job (LOCK RELEASED)", extra={
+                            logger.info("Worker finished job", extra={
                                 "extra_fields": {
                                     "worker_id": worker_id,
                                     "job_id": job.id,
