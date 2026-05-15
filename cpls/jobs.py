@@ -296,6 +296,10 @@ class JobQueue:
                             try:
                                 await gcs_client.safe_upload_job_result(job)
                             except Exception as upload_error:
+                                emit_event("gcs.upload_failed", {
+                                    **base_fields,
+                                    "error": str(upload_error),
+                                })
                                 logger.error("Failed to upload job result to GCS", extra={
                                     "extra_fields": {
                                         "job_id": job.id,
