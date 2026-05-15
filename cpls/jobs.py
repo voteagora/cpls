@@ -284,6 +284,7 @@ class JobQueue:
                                     "infra_dao_slug": dao_slug,
                                     "job_type": job.type,
                                     "status": "failed",
+                                    "error_type": error_type,
                                     "duration_seconds": duration_seconds,
                                     "error": str(e),
                                     "traceback": full_traceback
