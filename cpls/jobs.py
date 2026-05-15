@@ -22,31 +22,23 @@ logger = get_logger("cpls.jobs")
 
 
 def _classify_error(exc: Exception) -> str:
-    """Coarse error bucket for job.failed events (extend as production surfaces new cases)."""
+    """Classify job failures by exception type first, then by message substring as fallback."""
+    import httpx as _httpx
+
+    if isinstance(exc, _httpx.TimeoutException):
+        return "timeout"
+    if isinstance(exc, (_httpx.ConnectError, _httpx.ReadError, _httpx.RemoteProtocolError)):
+        return "upstream_error"
+    if isinstance(exc, (json.JSONDecodeError, ValueError, TypeError, KeyError)):
+        return "validation_error"
+
     s = str(exc).lower()
     if "timeout" in s or "timed out" in s:
         return "timeout"
-    if (
-        "database" in s
-        or "db" in s
-        or "sql" in s
-        or "postgres" in s
-        or "authentication failed" in s
-        or "password authentication" in s
-        or "connection refused" in s
-    ):
+    if "password authentication" in s or "postgres" in s or "sql" in s:
         return "db_error"
-    if (
-        "http" in s
-        or "network" in s
-        or "connection" in s
-        or "refused" in s
-        or "unreachable" in s
-        or "econnrefused" in s
-    ):
+    if "connection" in s or "unreachable" in s:
         return "upstream_error"
-    if "validation" in s:
-        return "validation_error"
     return "unknown"
 
 
