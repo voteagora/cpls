@@ -132,8 +132,10 @@ class JobQueue:
         infra_dao_slug = payload.get('infra_dao_slug', 'unknown')
         dao_lock = self._get_dao_lock(infra_dao_slug)
         
-        # Calculate payload size in bytes
-        payload_bytes = len(json.dumps(payload).encode('utf-8'))
+        try:
+            payload_bytes = len(json.dumps(payload).encode('utf-8'))
+        except (TypeError, ValueError):
+            payload_bytes = 0
         
         # Fields attached to observability events for this enqueue
         base_fields = {
