@@ -104,14 +104,14 @@ class JobQueue:
         oldest_job = min(pending_jobs, key=lambda j: j.created_at)
         return (datetime.now() - oldest_job.created_at).total_seconds()
 
-    async def _emit_queue_snapshot(self, infra_dao_slug: str) -> None:
+    def _emit_queue_snapshot(self, infra_dao_slug: str) -> None:
         depth = self.queue.qsize()
         oldest = (
             self._get_oldest_pending_job_age_seconds(infra_dao_slug)
             if infra_dao_slug != "unknown"
             else 0.0
         )
-        await emit_event(
+        emit_event(
             "queue.snapshot",
             {
                 "infra_dao_slug": infra_dao_slug,
@@ -146,7 +146,7 @@ class JobQueue:
             job.error = "Queue is full, job skipped"
             self.jobs[job_id] = job
 
-            await emit_event("job.skipped", {**base_fields, "reason": "queue_locked"})
+            emit_event("job.skipped", {**base_fields, "reason": "queue_locked"})
 
             logger.warning("Job skipped due to lock", extra={
                 "extra_fields": {
@@ -160,8 +160,8 @@ class JobQueue:
             self.jobs[job_id] = job
             await self.queue.put(job)
 
-            await emit_event("job.queued", {**base_fields, "payload_bytes": payload_bytes})
-            await self._emit_queue_snapshot(infra_dao_slug)
+            emit_event("job.queued", {**base_fields, "payload_bytes": payload_bytes})
+            self._emit_queue_snapshot(infra_dao_slug)
 
             logger.debug("Job queued", extra={
                 "extra_fields": {
@@ -206,7 +206,7 @@ class JobQueue:
                         }
                     })
                     self.queue.task_done()
-                    await self._emit_queue_snapshot("unknown")
+                    self._emit_queue_snapshot("unknown")
                     continue
 
                 # Acquire lock for this DAO to ensure only one job per DAO
@@ -241,7 +241,7 @@ class JobQueue:
                             "job_type": job.type
                         }
 
-                        await emit_event("job.started", base_fields)
+                        emit_event("job.started", base_fields)
 
                         # Track job execution duration
                         start_time = time.time()
@@ -251,7 +251,7 @@ class JobQueue:
 
                             duration_ms = (time.time() - start_time) * 1000
 
-                            await emit_event(
+                            emit_event(
                                 "job.completed",
                                 {
                                     **base_fields,
@@ -272,7 +272,7 @@ class JobQueue:
 
                             error_type = _classify_error(e)
                             failed_fields = {**base_fields, "error_type": error_type}
-                            await emit_event(
+                            emit_event(
                                 "job.failed",
                                 {
                                     **failed_fields,
@@ -317,7 +317,7 @@ class JobQueue:
                 finally:
                     # Always call task_done, even if lock acquisition or job processing failed
                     self.queue.task_done()
-                    await self._emit_queue_snapshot(dao_slug)
+                    self._emit_queue_snapshot(dao_slug)
 
             except asyncio.CancelledError:
                 logger.debug("Worker cancelled", extra={

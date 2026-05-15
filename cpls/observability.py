@@ -1,9 +1,11 @@
 """
 Axiom ingest for CPLS observability: unified JSON events (metrics + logs at write time).
 
-emit_event is fire-and-forget and never raises. Configure AXIOM_TOKEN and AXIOM_DATASET (see cpls.config) to enable sends.
+emit_event is truly fire-and-forget — it spawns a background task and returns immediately.
+Configure AXIOM_TOKEN and AXIOM_DATASET (see cpls.config) to enable sends.
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -59,14 +61,21 @@ def _log_axiom_error_once(
     log.warning("Axiom ingest failed", extra={"extra_fields": extra_fields})
 
 
-async def emit_event(event_type: str, fields: dict) -> None:
-    """POST one event to Axiom. Never raises; no-op if AXIOM_TOKEN or AXIOM_DATASET is unset."""
-    url = "https://api.axiom.co/v1/datasets/<unset>/ingest"
+def emit_event(event_type: str, fields: dict) -> None:
+    """Fire-and-forget: spawns a background task to POST one event to Axiom.
+    Returns immediately. Never raises. No-op if AXIOM_TOKEN or AXIOM_DATASET is unset."""
+    if not AXIOM_TOKEN or not AXIOM_DATASET:
+        return
     try:
-        if not AXIOM_TOKEN or not AXIOM_DATASET:
-            return
+        asyncio.create_task(_send_event(event_type, fields))
+    except RuntimeError:
+        pass
 
-        url = f"https://api.axiom.co/v1/datasets/{AXIOM_DATASET}/ingest"
+
+async def _send_event(event_type: str, fields: dict) -> None:
+    """Actual HTTP send — runs as a background task, never raises."""
+    url = f"https://api.axiom.co/v1/datasets/{AXIOM_DATASET}/ingest"
+    try:
         event_time_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         event: Dict[str, Any] = {
             "_time": event_time_iso,
