@@ -1,19 +1,18 @@
 """
 Axiom ingest for CPLS observability: unified JSON events (metrics + logs at write time).
 
-emit_event is fire-and-forget and never raises. Configure AXIOM_TOKEN and AXIOM_DATASET to enable sends.
+emit_event is fire-and-forget and never raises. Configure AXIOM_TOKEN and AXIOM_DATASET (see cpls.config) to enable sends.
 """
 
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from time import time
 from typing import Any, Dict, Optional
 
 import httpx
 
-from .config import ENVIRONMENT
+from .config import AXIOM_DATASET, AXIOM_TOKEN, ENVIRONMENT
 
 _logging_initialized = False
 
@@ -23,6 +22,7 @@ _axiom_client: Optional[httpx.AsyncClient] = None
 
 
 def _get_axiom_client() -> httpx.AsyncClient:
+    """Dedicated short-timeout client for ingest — isolated from job HTTP (create_http_client)."""
     global _axiom_client
     if _axiom_client is None:
         _axiom_client = httpx.AsyncClient(timeout=httpx.Timeout(2.0))
@@ -63,15 +63,13 @@ async def emit_event(event_type: str, fields: dict) -> None:
     """POST one event to Axiom. Never raises; no-op if AXIOM_TOKEN or AXIOM_DATASET is unset."""
     url = "https://api.axiom.co/v1/datasets/<unset>/ingest"
     try:
-        token = os.getenv("AXIOM_TOKEN", "")
-        dataset = os.getenv("AXIOM_DATASET", "")
-        if not token or not dataset:
+        if not AXIOM_TOKEN or not AXIOM_DATASET:
             return
 
-        url = f"https://api.axiom.co/v1/datasets/{dataset}/ingest"
-        _time = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        url = f"https://api.axiom.co/v1/datasets/{AXIOM_DATASET}/ingest"
+        event_time_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         event: Dict[str, Any] = {
-            "_time": _time,
+            "_time": event_time_iso,
             "event_type": event_type,
             "env": ENVIRONMENT,
             "service": "cpls",
@@ -82,7 +80,7 @@ async def emit_event(event_type: str, fields: dict) -> None:
         resp = await client.post(
             url,
             headers={
-                "Authorization": f"Bearer {token}",
+                "Authorization": f"Bearer {AXIOM_TOKEN}",
                 "Content-Type": "application/json",
             },
             json=[event],

@@ -27,6 +27,10 @@ RESET_PROPOSALS_ON_RESTART = os.getenv("RESET_PROPOSALS_ON_RESTART", "true").low
 PROPOSAL_CHECK_API_URL = os.getenv("PROPOSAL_CHECK_API_URL", "")
 PROPOSAL_CHECK_SECRET = os.getenv("PROPOSAL_CHECK_SECRET", "")
 
+# Axiom observability (emit_event no-ops if either is unset)
+AXIOM_TOKEN = (os.getenv("AXIOM_TOKEN", "") or "").strip()
+AXIOM_DATASET = (os.getenv("AXIOM_DATASET", "") or "").strip()
+
 PROPOSAL_CHECK_PREFIXES_PROD = {
   "syndicate": "https://www.syndicatecollective.org/",
   "towns": "https://www.townslodge.com/",
@@ -63,6 +67,8 @@ print(f"TENANTS_CONFIG_PATH: {TENANTS_CONFIG_PATH}")
 print(f"DEPLOYMENT: {DEPLOYMENT}")
 print(f"INFRA_DAO_SLUGS: {INFRA_DAO_SLUGS}")
 print(f"RESET_PROPOSALS_ON_RESTART: {RESET_PROPOSALS_ON_RESTART}")
+print(f"AXIOM_DATASET: {AXIOM_DATASET or '(unset)'}")
+print(f"AXIOM_TOKEN: {'(set)' if AXIOM_TOKEN else '(unset)'}")
 print("=" * 60)
 
 

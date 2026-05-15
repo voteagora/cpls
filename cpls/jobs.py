@@ -4,24 +4,51 @@ import traceback
 import time
 import json
 
-from typing import Dict, Optional, List, TYPE_CHECKING
+from typing import Dict, Optional, List
 from datetime import datetime
 from pydantic import BaseModel
 from enum import Enum
-import httpx
 
 from .sync_snapshot import SnapshotSync
 from .sync_daonode import DaoNodeSync
 from .sync_eas_atlas import EASAtlasSync
 from .sync_eas_oodao import EASOoDaoSync
 
-import requests as r
-
 from .gcs import GCSClient
 from .config import GCS_BUCKET_NAME, create_http_client
 from .observability import emit_event, get_logger
 
 logger = get_logger("cpls.jobs")
+
+
+def _classify_error(exc: Exception) -> str:
+    """Coarse error bucket for job.failed events (extend as production surfaces new cases)."""
+    s = str(exc).lower()
+    if "timeout" in s or "timed out" in s:
+        return "timeout"
+    if (
+        "database" in s
+        or "db" in s
+        or "sql" in s
+        or "postgres" in s
+        or "authentication failed" in s
+        or "password authentication" in s
+        or "connection refused" in s
+    ):
+        return "db_error"
+    if (
+        "http" in s
+        or "network" in s
+        or "connection" in s
+        or "refused" in s
+        or "unreachable" in s
+        or "econnrefused" in s
+    ):
+        return "upstream_error"
+    if "validation" in s:
+        return "validation_error"
+    return "unknown"
+
 
 class JobStatus(str, Enum):
     PENDING = "pending"
@@ -108,18 +135,18 @@ class JobQueue:
         # Calculate payload size in bytes
         payload_bytes = len(json.dumps(payload).encode('utf-8'))
         
-        # Build base tags
-        base_tags = {
+        # Fields attached to observability events for this enqueue
+        base_fields = {
             "infra_dao_slug": infra_dao_slug,
             "job_type": job_type
         }
-        
+
         if dao_lock.locked():
             job.status = JobStatus.SKIPPED
             job.error = "Queue is full, job skipped"
             self.jobs[job_id] = job
 
-            await emit_event("job.skipped", {**base_tags, "reason": "queue_locked"})
+            await emit_event("job.skipped", {**base_fields, "reason": "queue_locked"})
 
             logger.warning("Job skipped due to lock", extra={
                 "extra_fields": {
@@ -133,7 +160,7 @@ class JobQueue:
             self.jobs[job_id] = job
             await self.queue.put(job)
 
-            await emit_event("job.queued", {**base_tags, "payload_bytes": payload_bytes})
+            await emit_event("job.queued", {**base_fields, "payload_bytes": payload_bytes})
             await self._emit_queue_snapshot(infra_dao_slug)
 
             logger.debug("Job queued", extra={
@@ -209,14 +236,12 @@ class JobQueue:
                         job.status = JobStatus.PROCESSING
                         job.started_at = datetime.now()
                         
-                        # Build base tags
-                        base_tags = {
+                        base_fields = {
                             "infra_dao_slug": dao_slug,
                             "job_type": job.type
                         }
-                        
-                        # Emit started event
-                        await emit_event("job.started", dict(base_tags))
+
+                        await emit_event("job.started", base_fields)
 
                         # Track job execution duration
                         start_time = time.time()
@@ -229,7 +254,7 @@ class JobQueue:
                             await emit_event(
                                 "job.completed",
                                 {
-                                    **base_tags,
+                                    **base_fields,
                                     "duration_ms": duration_ms,
                                     "stats": job.stats,
                                 },
@@ -241,30 +266,16 @@ class JobQueue:
 
                             # Store full traceback in job
                             job.error = full_traceback
-                            
-                            # Calculate duration even on failure (in milliseconds)
+
                             duration_seconds = time.time() - start_time
                             duration_ms = duration_seconds * 1000
-                            
-                            # Classify error type
-                            error_type = "unknown"
-                            error_str = str(e).lower()
-                            if "timeout" in error_str or "timed out" in error_str:
-                                error_type = "timeout"
-                            elif "database" in error_str or "db" in error_str or "sql" in error_str:
-                                error_type = "db_error"
-                            elif "http" in error_str or "connection" in error_str or "network" in error_str:
-                                error_type = "upstream_error"
-                            elif "validation" in error_str or "invalid" in error_str:
-                                error_type = "validation_error"
-                            
-                            # Emit failed event with error classification
-                            failed_tags = base_tags.copy()
-                            failed_tags["error_type"] = error_type
+
+                            error_type = _classify_error(e)
+                            failed_fields = {**base_fields, "error_type": error_type}
                             await emit_event(
                                 "job.failed",
                                 {
-                                    **failed_tags,
+                                    **failed_fields,
                                     "duration_ms": duration_ms,
                                     "error": str(e),
                                 },
