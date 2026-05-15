@@ -129,8 +129,8 @@ class JobQueue:
         except (TypeError, ValueError):
             payload_bytes = 0
         
-        # Fields attached to observability events for this enqueue
         base_fields = {
+            "job_id": job_id,
             "infra_dao_slug": infra_dao_slug,
             "job_type": job_type
         }
@@ -231,6 +231,7 @@ class JobQueue:
                         job.started_at = datetime.now()
                         
                         base_fields = {
+                            "job_id": job.id,
                             "infra_dao_slug": dao_slug,
                             "job_type": job.type
                         }
