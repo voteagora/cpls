@@ -121,7 +121,9 @@ class JobQueue:
             created_at=datetime.now()
         )
 
-        infra_dao_slug = payload.get('infra_dao_slug', 'unknown')
+        infra_dao_slug = payload.get('infra_dao_slug')
+        if not infra_dao_slug:
+            raise ValueError(f"Job payload missing required 'infra_dao_slug': {job_id}")
         dao_lock = self._get_dao_lock(infra_dao_slug)
         
         try:
