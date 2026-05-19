@@ -18,6 +18,7 @@ import uvicorn
 from .ui import generate_dashboard_html
 from .gcs import GCSClient
 from .jobs import JobQueue, JobRequest, JobStatus
+from .observability import setup_logging
 import time
 
 from .config import INFRA_DAO_SLUGS, ENVIRONMENT, GCS_BUCKET_NAME, SERVER_HOST, SERVER_PORT, SCHEDULER_INTERVAL_MINUTES, load_tenant_configs, RESET_PROPOSALS_ON_RESTART
@@ -112,6 +113,7 @@ async def scheduled_ens_job(config: Dict, infra_dao_slug: str):
 async def lifespan(app_instance: FastAPI):
     """Manage application lifecycle"""
     # Startup
+    setup_logging()
     print("Starting server...")
 
     # Load tenant configs once at startup and attach to app state
