@@ -252,11 +252,13 @@ class Sync:
         else:
             add_ts = ""
 
-        qry = f"""select transaction_hash, block_number, chain_id, voter, support, weight, reason, params {add_ts} from {self.infra_dao_slug}.votes where proposal_id = '{proposal_id}';"""
+        gov_addr = getattr(self, 'gov_addr', None)
+        contract_filter = f" and contract = '{gov_addr.lower()}'" if gov_addr else ""
+
+        qry = f"""select transaction_hash, block_number, chain_id, voter, support, weight, reason, params {add_ts} from {self.infra_dao_slug}.votes where proposal_id = '{proposal_id}'{contract_filter};"""
 
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            # No need to contract scope this, because the proposal_id is unique
             return await connection.fetch(qry)
 
     
