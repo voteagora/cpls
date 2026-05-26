@@ -87,16 +87,17 @@ class TestReadQuorumBranches:
 
     @pytest.mark.asyncio
     async def test_cyber_quorum(self, daonode_sync):
-        sync, _, mock_bc, _, mock_conn = daonode_sync
+        sync, _, mock_bc, _, _ = daonode_sync
         sync.infra_dao_slug = "cyber"
         sync.chain_id = 7560
-        mock_conn.fetchrow = AsyncMock(return_value={"votable_supply": "1000000"})
-        result = await sync.read_quorum({
-            "id": "1", "start_block": 100,
-            "proposal_type_info": {"quorum": 3000}
-        })
-        # 1000000 * (3000 * 100000) / 1000000000 = 300000
+        mock_bc.contract_call_encoded = AsyncMock(
+            return_value={"result": "0x00000000000000000000000000000000000000000000000000000000000493e0"}
+        )
+        result = await sync.read_quorum({"id": "1", "start_block": 100})
         assert result == "300000"
+        mock_bc.contract_call_encoded.assert_awaited_once_with(
+            7560, sync.gov_addr, 101, "quorum(uint256)", [1]
+        )
 
     @pytest.mark.asyncio
     async def test_scroll_quorum(self, daonode_sync):
