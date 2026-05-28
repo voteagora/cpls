@@ -9,7 +9,7 @@ from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS
 
 from .title_processor import get_title_from_proposal_description
 
-from .config import ALCHEMY_API_KEY
+from .config import ALCHEMY_API_KEY, DEPLOYMENT
 
 S9_BLOCK_NUMBER = 146161869
 
@@ -29,13 +29,19 @@ class EASAtlasSync(Sync):
     
 
     async def read_citizens(self, season):
+        # Prod uses season-specific materialized views; dev has a single unified view
+        if DEPLOYMENT == 'main':
+            table = f"atlas.citizens_mat_s{season}"
+        else:
+            table = "atlas.citizens_mat"
+
         qry = f"""SELECT 
             c."address" as addr, 
             1 as vp, 
             citizen_type,
             voter_metadata_text::json->>'name' name, 
             voter_metadata_text::json->>'image' image
-        FROM atlas.citizens_mat_s{season} c"""
+        FROM {table} c"""
 
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
@@ -73,7 +79,14 @@ class EASAtlasSync(Sync):
         refreshed_count = 0
         for proposals_uid in known_create_attestations:
 
-            for chain_id in [10, 1]:
+            # On main/prod we try both OP Mainnet (10) and Ethereum (1);
+            # on dev/test we use the chain_id configured in the deployment config.
+            if DEPLOYMENT == 'main':
+                chain_ids_to_try = [10, 1]
+            else:
+                chain_ids_to_try = [self.config['deployment']['chain_id']]
+
+            for chain_id in chain_ids_to_try:
                 
                 proposal_attestation = await self.bc.get_decoded_eas(chain_id, proposals_uid)
 

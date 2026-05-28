@@ -7,6 +7,9 @@ from .config import GCS_BUCKET_NAME, ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, AL
 
 import hashlib
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 FIVE_MINUTES_IN_SECONDS = 5 * 60
 
@@ -130,7 +133,18 @@ class Sync:
             if prop['data_eng_properties']['source'] == 'eas-atlas':
 
                 if prop['hybrid']:
-                    print("Confusingly, removing {} from full list because it's hybrid, so {} onchain should have referenc to it. ".format(prop['id'], prop['onchain_proposalid']))
+                    onchain_id = prop.get('onchain_proposalid')
+                    if onchain_id is None:
+                        logger.warning(
+                            "Hybrid EAS-Atlas proposal missing onchain_proposalid: %s",
+                            json.dumps(prop, sort_keys=True, default=str),
+                        )
+                    else:
+                        print(
+                            "Confusingly, removing {} from full list because it's hybrid, so {} onchain should have referenc to it. ".format(
+                                prop['id'], onchain_id
+                            )
+                        )
                     continue
 
             fresh_list.append(prop)

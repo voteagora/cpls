@@ -151,7 +151,6 @@ class BlockCacheClient:
             data = str(encoded_params.hex()).removeprefix("0x")
         else:
             data = ''
-
         self.logr.info(f"Calling contract {contract_address} with method {method_signature} and data {data} (from {values}) at block {block_number} for chain {chain_id} and address {contract_address}")
 
         # Call the lower-level contract_call method
@@ -159,13 +158,20 @@ class BlockCacheClient:
 
         return result
     
-    async def votable_supply_at_block_with_oracle(self, contract_address, block_number):
+    async def votable_supply_at_block_with_oracle(self, chain_id, contract_address, block_number):
+        if chain_id == 10:
+            BLOCK_ON_JAN_18_2024 = 114968612
+            as_of_block_number = max([BLOCK_ON_JAN_18_2024, block_number])
+        else:
+            as_of_block_number = block_number
 
-        BLOCK_ON_JAN_18_2024 = 114968612
-        as_of_block_number = max([BLOCK_ON_JAN_18_2024, block_number])
-        result = await self.contract_call_encoded(10, contract_address, as_of_block_number, 'votableSupply(uint256)', [block_number])
-        vs = int(result['result'], 16)
-        return vs
+        result = await self.contract_call_encoded(chain_id, contract_address, as_of_block_number, 'votableSupply(uint256)', [block_number])
+        
+        result_value = result.get('result', '')
+        if not result_value or result_value == '0x':
+            raise ValueError(f"Invalid votable supply result for contract {contract_address} at block {block_number}")
+        
+        return int(result_value, 16)
 
     async def votable_supply_at_block(self, chain_id, contract_address, block_number):
         result = await self.contract_call_encoded(chain_id, contract_address, block_number, 'votableSupply()', [])
