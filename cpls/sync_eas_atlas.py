@@ -23,7 +23,7 @@ class EASAtlasSync(Sync):
     async def read_votes(self, proposal_id):
         pool = await self.pg.connect()
         async with pool.acquire() as connection:
-            rows = await connection.fetch(f"""select voter, support, weight::text, reason, params, citizen_type, voter_metadata->>'name' name, voter_metadata->>'image' image from atlas."VotesWithMeta" where  proposal_id = '{proposal_id}';""")
+            rows = await connection.fetch(f"""select voter, support, weight::text, reason, params, block_number, citizen_type, voter_metadata->>'name' name, voter_metadata->>'image' image from atlas."VotesWithMeta" where  proposal_id = '{proposal_id}';""")
             rows = [dict(r) for r in rows]
             return rows
     

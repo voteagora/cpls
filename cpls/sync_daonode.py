@@ -616,8 +616,8 @@ class DaoNodeSync(Sync):
 
 
                     if stage == '0x0000000000000000000000000000000000000000000000000000000000000004' and proposal['voting_module_name'] in ('optimismtic', 'approval'):
-                        proposal['lifecycle_stage'] = 'SUCCEEDED'
-                        liveness = 'archived'
+                        if proposal.get('lifecycle_stage', None) != 'QUEUED':
+                            proposal['lifecycle_stage'] = 'SUCCEEDED'
 
 
                     if stage == '0x0000000000000000000000000000000000000000000000000000000000000003':
