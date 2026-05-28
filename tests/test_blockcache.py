@@ -148,8 +148,8 @@ class TestVotableSupplyAtBlock:
         client.contract_call_encoded = AsyncMock(
             return_value={"result": "0x64"}
         )
-        # block_number < BLOCK_ON_JAN_18_2024 (114968612)
-        await client.votable_supply_at_block_with_oracle("0xcontract", 100)
+        # block_number < BLOCK_ON_JAN_18_2024 (114968612), chain_id=10 triggers OP logic
+        await client.votable_supply_at_block_with_oracle(10, "0xcontract", 100)
         # Should use the max of [114968612, 100] = 114968612
         call_args = client.contract_call_encoded.call_args
         assert call_args[0][2] == 114968612  # as_of_block_number
@@ -159,7 +159,7 @@ class TestVotableSupplyAtBlock:
         client = BlockCacheClient("http://test", "key", http_client=AsyncMock())
         client.contract_call_encoded = AsyncMock(return_value={"result": "0x"})
         with pytest.raises(ValueError):
-            await client.votable_supply_at_block_with_oracle("0xcontract", 100)
+            await client.votable_supply_at_block_with_oracle(10, "0xcontract", 100)
 
     @pytest.mark.asyncio
     async def test_oracle_high_block_uses_block_number_directly(self):
@@ -167,7 +167,7 @@ class TestVotableSupplyAtBlock:
         client = BlockCacheClient("http://test", "key", http_client=AsyncMock())
         client.contract_call_encoded = AsyncMock(return_value={"result": "0x64"})
         high_block = 200000000  # > BLOCK_ON_JAN_18_2024 (114968612)
-        await client.votable_supply_at_block_with_oracle("0xcontract", high_block)
+        await client.votable_supply_at_block_with_oracle(10, "0xcontract", high_block)
         call_args = client.contract_call_encoded.call_args
         assert call_args[0][2] == high_block  # as_of_block_number == block_number
 
