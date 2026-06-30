@@ -4,8 +4,8 @@ from typing import Any, Dict, List, Optional, Set
 
 import requests as req
 
-from gcs import GCSClient
-from config import ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES
+from ..gcs import GCSClient
+from ..config import ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES
 
 from .utils import json_hash
 

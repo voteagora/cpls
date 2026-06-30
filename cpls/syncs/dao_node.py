@@ -1,7 +1,7 @@
 import requests as req
 
-from gcs import GCSClient
-from config import ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY
+from ..gcs import GCSClient
+from ..config import ENVIRONMENT, SCHEDULER_INTERVAL_MINUTES, ALCHEMY_API_KEY
 
 from .utils import json_hash
 
