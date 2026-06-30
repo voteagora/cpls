@@ -97,8 +97,8 @@ def test_snapshot_sync_uploads_and_splits_by_liveness():
 
     asyncio.run(sync.refresh_list(fake_gcs))
 
-    active_blob = fake_gcs.storage["data/testspace/proposal/snapshot/raw/1.json"]
-    archived_blob = fake_gcs.storage["data/testspace/proposal/snapshot/raw/2.json"]
+    active_blob = fake_gcs.storage["data/testspace/proposal/snapshot/raw/1.json.gz"]
+    archived_blob = fake_gcs.storage["data/testspace/proposal/snapshot/raw/2.json.gz"]
 
     assert active_blob["metadata"]["liveness"] == "live"
     assert archived_blob["metadata"]["liveness"] == "archived"
@@ -135,7 +135,7 @@ def test_snapshot_sync_marks_deleted_after_consecutive_misses():
 
     # Gone from the list AND null on a direct lookup -> a confirmed miss.
     fake_api.fetch_proposal_overrides["p1"] = None
-    blob_name = "data/testspace/proposal/snapshot/raw/p1.json"
+    blob_name = "data/testspace/proposal/snapshot/raw/p1.json.gz"
 
     # First miss: deferred (strike recorded), not yet deleted.
     asyncio.run(sync.refresh_list(fake_gcs))
@@ -174,7 +174,7 @@ def test_snapshot_sync_keeps_flagged_proposal_alive():
 
     # Flagged -> excluded from the list, but still resolves by id.
     fake_api.fetch_proposal_overrides["p1"] = dict(proposal)
-    blob_name = "data/testspace/proposal/snapshot/raw/p1.json"
+    blob_name = "data/testspace/proposal/snapshot/raw/p1.json.gz"
 
     # Repeated absence from the list must not delete a proposal that still exists.
     asyncio.run(sync.refresh_list(fake_gcs))
@@ -206,7 +206,7 @@ def test_snapshot_sync_resets_strikes_when_proposal_returns():
 
     # Transiently absent from both list and id lookup -> one strike.
     fake_api.fetch_proposal_overrides["p1"] = None
-    blob_name = "data/testspace/proposal/snapshot/raw/p1.json"
+    blob_name = "data/testspace/proposal/snapshot/raw/p1.json.gz"
     asyncio.run(sync.refresh_list(fake_gcs))
     props = fake_gcs.storage[blob_name]["data"]["data_eng_properties"]
     assert props["liveness"] == "live"
@@ -241,12 +241,44 @@ def test_snapshot_sync_updates_when_votes_change():
     sync = SnapshotSync("testspace", api_client=fake_api, now_provider=lambda: next(now_counter))
 
     asyncio.run(sync.refresh_list(fake_gcs))
-    first_hash = fake_gcs.storage["data/testspace/proposal/snapshot/raw/p2.json"]["metadata"]["hash"]
+    first_hash = fake_gcs.storage["data/testspace/proposal/snapshot/raw/p2.json.gz"]["metadata"]["hash"]
 
     asyncio.run(sync.refresh_list(fake_gcs))
-    updated_blob = fake_gcs.storage["data/testspace/proposal/snapshot/raw/p2.json"]
+    updated_blob = fake_gcs.storage["data/testspace/proposal/snapshot/raw/p2.json.gz"]
     second_hash = updated_blob["metadata"]["hash"]
 
     assert first_hash != second_hash
-    assert updated_blob["data"]["votes"] == 13
+    assert updated_blob["data"]["num_of_votes"] == 13
     assert updated_blob["data"]["scores_total"] == 13
+
+
+def test_snapshot_sync_normalizes_downstream_fields():
+    proposal = {
+        "id": "p3",
+        "state": "active",
+        "title": "Normalize me",
+        "body": "Long body",
+        "choices": ["Yes", "No"],
+        "start": 100,
+        "end": 200,
+        "created": 90,
+        "votes": 7,
+        "link": "https://snapshot.box/#/s:ens.eth/proposal/p3",
+    }
+
+    fake_api = FakeSnapshotAPIClient([[proposal]])
+    fake_gcs = FakeGCSClient()
+    now_counter = count(start=4000)
+
+    sync = SnapshotSync("testspace", api_client=fake_api, now_provider=lambda: next(now_counter))
+    asyncio.run(sync.refresh_list(fake_gcs))
+
+    data = fake_gcs.storage["data/testspace/proposal/snapshot/raw/p3.json.gz"]["data"]
+    assert data["num_of_votes"] == 7
+    assert data["start_blocktime"] == 100
+    assert data["end_blocktime"] == 200
+    assert data["created_blocktime"] == 90
+    assert data["description"] == "Long body"
+    assert data["url"] == "https://snapshot.box/#/s:ens.eth/proposal/p3"
+    assert "votes" not in data
+    assert "body" not in data

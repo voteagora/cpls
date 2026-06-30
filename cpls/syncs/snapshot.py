@@ -32,6 +32,8 @@ class SnapshotAPIClient:
         "created\n"
         "updated\n"
         "plugins\n"
+        "votes\n"
+        "link\n"
     )
 
     def __init__(self, endpoint: Optional[str] = None, http_client: Optional[Any] = None):
@@ -125,9 +127,10 @@ class SnapshotSync:
             proposal_id = proposal["id"]
             seen_ids.add(proposal_id)
 
-            blob_name = f"{prefix}{proposal_id}.json"
+            blob_name = self._raw_blob_name(prefix, proposal_id)
             existing_record = existing.get(proposal_id)
             proposal_copy = copy.deepcopy(proposal)
+            self._normalize_proposal(proposal_copy)
 
             liveness = self._proposal_liveness(proposal_copy.get("state"))
             timestamp = self.now_provider()
@@ -182,11 +185,14 @@ class SnapshotSync:
         proposals: Dict[str, Dict[str, Any]] = {}
         blobs = await gcs_client.list_blobs(prefix=prefix)
         for blob in blobs:
-            blob_name = self._as_json_name(blob.name)
-            data = await gcs_client.read_dict(blob_name)
+            if not (blob.name.endswith(".json") or blob.name.endswith(".json.gz")):
+                continue
+            # Read the actual object name; read_dict only decompresses when the
+            # name ends in .gz, so the production .json.gz blobs must be read as-is.
+            data = await gcs_client.read_dict(blob.name)
             if not data:
                 continue
-            proposal_id = data.get("id") or self._proposal_id_from_name(blob_name)
+            proposal_id = data.get("id") or self._proposal_id_from_name(blob.name)
             proposals[proposal_id] = data
         return proposals
 
@@ -274,7 +280,7 @@ class SnapshotSync:
         }
         await gcs_client.upload_dict(
             proposal_copy,
-            f"{prefix}{proposal_id}.json",
+            self._raw_blob_name(prefix, proposal_id),
             metadata=metadata,
             cache_control=self._cache_control(liveness),
         )
@@ -319,7 +325,7 @@ class SnapshotSync:
         }
         await gcs_client.upload_dict(
             proposal_copy,
-            f"{prefix}{proposal_id}.json",
+            self._raw_blob_name(prefix, proposal_id),
             metadata=metadata,
             cache_control=self._cache_control("deleted"),
         )
@@ -341,6 +347,7 @@ class SnapshotSync:
 
             summary = copy.deepcopy(record)
             summary.pop("body", None)
+            summary.pop("description", None)
             if "data_eng_properties" in summary:
                 summary["data_eng_properties"].pop("hash", None)
 
@@ -363,27 +370,45 @@ class SnapshotSync:
         return "archived"
 
     @staticmethod
+    def _raw_blob_name(prefix: str, proposal_id: str) -> str:
+        # Match the production pipeline's gzipped objects so this sync updates the
+        # same blobs consumers already read (instead of writing a parallel .json).
+        return f"{prefix}{proposal_id}.json.gz"
+
+    @staticmethod
     def _proposal_id_from_name(blob_name: str) -> str:
         filename = blob_name.split("/")[-1]
         return filename.replace(".json.gz", "").replace(".json", "")
 
     @staticmethod
-    def _as_json_name(blob_name: str) -> str:
-        if blob_name.endswith(".json"):
-            return blob_name
-        if blob_name.endswith(".json.gz"):
-            return blob_name[:-3]
-        return blob_name
+    def _normalize_proposal(proposal: Dict[str, Any]) -> None:
+        # Map Snapshot's raw fields onto the contract downstream consumers expect
+        # (mirrors the legacy sync_snapshot.py enrichment).
+        if "votes" in proposal:
+            proposal["num_of_votes"] = proposal.pop("votes")
+        if "body" in proposal:
+            proposal["description"] = proposal.pop("body")
+        if "start" in proposal:
+            proposal["start_blocktime"] = proposal["start"]
+        if "end" in proposal:
+            proposal["end_blocktime"] = proposal["end"]
+        if "created" in proposal:
+            proposal["created_blocktime"] = proposal["created"]
+        # Notification consumers read `url`; Snapshot returns the proposal page as
+        # `link`. Expose both so the snapshot.box link survives downstream.
+        link = proposal.get("link")
+        if link and not proposal.get("url"):
+            proposal["url"] = link
 
     @staticmethod
     def _cache_control(liveness: str) -> str:
         if liveness == "live":
-            if ENVIRONMENT == "production":
+            if ENVIRONMENT == "prod":
                 max_age = 30 * SCHEDULER_INTERVAL_MINUTES
             else:
                 max_age = 10 * SCHEDULER_INTERVAL_MINUTES
         elif liveness == "archived":
-            if ENVIRONMENT == "production":
+            if ENVIRONMENT == "prod":
                 max_age = 365 * 24 * 60 * 60
             else:
                 max_age = 2 * 60

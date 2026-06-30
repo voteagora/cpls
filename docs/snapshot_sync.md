@@ -20,7 +20,7 @@ This document captures the new Snapshot integration that now runs alongside the 
 
 ## API Access Layer (`SnapshotAPIClient`)
 
-- A minimal GraphQL client issues paginated `proposals` queries (`first=1000`) with a `flagged: false` guard, reproducing the filtering from the old indexer.
+- A minimal GraphQL client issues paginated `proposals` queries (`first=1000`) with a `flagged: false` guard, reproducing the filtering from the old indexer. The selection includes `votes` and `link` so the raw objects carry vote counts and the proposal URL.
 - Individual lookups (`proposal(id: …)`) are available to confirm whether a missing ID was deleted or only temporarily absent.
 - Using a dedicated class makes the sync code testable by swapping in fakes.
 
@@ -30,9 +30,11 @@ This document captures the new Snapshot integration that now runs alongside the 
   - `dao_node.py` retains the legacy DAO-Node sync logic (tidied but behaviourally identical).
   - `snapshot.py` contains `SnapshotAPIClient` plus `SnapshotSync`.
   - `utils.py` holds the shared `json_hash` helper.
-  - `__init__.py` re-exports both syncs so existing imports still work (`from syncs import ...`).
+  - `__init__.py` re-exports both syncs (`from cpls.syncs import ...`).
 - `SnapshotSync` mirrors `DaoNodeSync` but works entirely off Snapshot’s GraphQL API.
-- Blobs live under `data/<alias>/proposal/snapshot/raw/<proposal_id>.json[.gz]` with metadata (`source`, `liveness`, `hash`, `synced_at`, optional `deleted_at`).
+- Raw blobs are written gzipped at `data/<alias>/proposal/snapshot/raw/<proposal_id>.json.gz` (the production object name) so this sync updates the same blobs existing consumers read, with metadata (`source`, `liveness`, `hash`, `synced_at`, optional `deleted_at`).
+- Each proposal is normalized onto the downstream contract before hashing/writing: `votes → num_of_votes`, `start/end/created → *_blocktime`, `body → description`, and `link → url`. This mirrors the legacy `sync_snapshot.py` enrichment so notification consumers keep working.
+- Cache lifetimes are selected via `ENVIRONMENT == 'prod'` (the repo's production value).
 - The payload hash is computed from the proposal data + liveness to avoid accidental cache busting when only metadata changes. If nothing changed, the existing blob is left untouched but `synced_at` is refreshed in-memory for bookkeeping.
 - Liveness buckets:
   - `live` for `pending`/`active`
