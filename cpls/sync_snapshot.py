@@ -145,7 +145,17 @@ class SnapshotGraphQLClient:
                 """ % proposal_id
 
         resp = await self.client.post(self.url, json={'query': QUERY})
-        return resp.json().get('data', {}).get('item')
+        resp.raise_for_status()
+        body = resp.json()
+        # A GraphQL error payload (HTTP 200, errors[], possibly null data) is NOT a
+        # deletion. Raise so the caller skips verification instead of counting a miss;
+        # only an explicit null `item` with no errors means the proposal is gone.
+        if body.get('errors'):
+            raise RuntimeError(f"Snapshot API error: {body['errors']}")
+        data = body.get('data')
+        if data is None:
+            raise RuntimeError("Snapshot API returned no data")
+        return data.get('item')
 
 
 

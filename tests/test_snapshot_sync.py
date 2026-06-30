@@ -128,6 +128,44 @@ async def test_archived_proposals_are_not_reconciled():
     sync.sc.get_proposal.assert_not_called()
 
 
+def _client_with_response(json_body, status_error=None):
+    from cpls.sync_snapshot import SnapshotGraphQLClient
+
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock(side_effect=status_error)
+    resp.json = MagicMock(return_value=json_body)
+    http = AsyncMock()
+    http.post = AsyncMock(return_value=resp)
+    return SnapshotGraphQLClient("ens", http)
+
+
+@pytest.mark.asyncio
+async def test_get_proposal_returns_none_only_for_genuine_deletion():
+    client = _client_with_response({"data": {"item": None}})
+    assert await client.get_proposal("p1") is None
+
+
+@pytest.mark.asyncio
+async def test_get_proposal_returns_proposal_when_present():
+    client = _client_with_response({"data": {"item": {"id": "p1", "state": "closed"}}})
+    assert await client.get_proposal("p1") == {"id": "p1", "state": "closed"}
+
+
+@pytest.mark.asyncio
+async def test_get_proposal_raises_on_graphql_error_payload():
+    # HTTP 200 with errors and no data must NOT be read as a deletion.
+    client = _client_with_response({"errors": [{"message": "boom"}]})
+    with pytest.raises(Exception):
+        await client.get_proposal("p1")
+
+
+@pytest.mark.asyncio
+async def test_get_proposal_raises_on_http_error():
+    client = _client_with_response({}, status_error=RuntimeError("500"))
+    with pytest.raises(Exception):
+        await client.get_proposal("p1")
+
+
 @pytest.mark.asyncio
 async def test_api_error_never_deletes():
     sync = make_sync()
