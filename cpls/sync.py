@@ -77,6 +77,10 @@ class Sync:
             else:
                 max_age = 2 * 60
 
+        elif liveness == 'deleted':
+            # Short-lived: a retired proposal should refresh quickly downstream.
+            max_age = SCHEDULER_INTERVAL_MINUTES * 60
+
         else:
             raise Exception(f"Unknown liveness: {liveness}")
 
@@ -96,7 +100,7 @@ class Sync:
             blob.reload() # refreshes metadata from server
             data = await gcs_client.read_dict(blob.name)
 
-            if data['data_eng_properties']['liveness'] == 'unqualified':
+            if data['data_eng_properties']['liveness'] in ('unqualified', 'deleted'):
                 continue
 
             del data['description']
