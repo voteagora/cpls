@@ -16,7 +16,12 @@ from tenacity import (
     after_log
 )
 
-from typing import List
+from typing import List, Optional
+
+# A live proposal must be confirmed absent (missing from the space list AND null on
+# a direct id lookup) on this many consecutive syncs before it is retired, so a
+# transient API blip or a flagged proposal can't delete a live one.
+SNAPSHOT_DELETION_MISS_THRESHOLD = 2
 
 # Configure retry decorator for Snapshot GraphQL operations
 snapshot_retry = retry(
@@ -125,6 +130,23 @@ class SnapshotGraphQLClient:
 
         return payload
 
+    @snapshot_retry
+    async def get_proposal(self, proposal_id) -> Optional[dict]:
+        # Direct lookup used to confirm a disappearance. Snapshot returns null once
+        # a proposal is deleted, but still returns flagged ones, so this distinguishes
+        # "deleted" from "merely dropped from the flagged:false list".
+        QUERY = """
+                query {
+                    item: proposal(id: "%s") {
+                        id
+                        state
+                    }
+                }
+                """ % proposal_id
+
+        resp = await self.client.post(self.url, json={'query': QUERY})
+        return resp.json().get('data', {}).get('item')
+
 
 
 class SnapshotSync(Sync):
@@ -155,10 +177,12 @@ class SnapshotSync(Sync):
         anything_changed = False
         skipped_count = 0
         refreshed_count = 0
+        seen_ids = set()
 
         for i, proposal in enumerate(proposals):
-        
+
             proposal_id = proposal['id']
+            seen_ids.add(proposal_id)
 
             try:
                 blob, existing_liveness, existing_proposal_hash, existing_num_of_votes  = await self.read_existing_raw_proposal_hash_if_exists(proposal_id, gcs_client)
@@ -251,6 +275,9 @@ class SnapshotSync(Sync):
 
             await self.overwrite_proposal(proposal, proposal_hash, liveness, gcs_client)
 
+        if await self._reconcile_deleted_proposals(seen_ids, gcs_client):
+            anything_changed = True
+
         if anything_changed or self.reset:
             await self.refresh_source_list(gcs_client)
             await self.refresh_full_list(gcs_client)
@@ -260,6 +287,95 @@ class SnapshotSync(Sync):
             'skipped': skipped_count,
             'refreshed': refreshed_count
         }
+
+    async def _reconcile_deleted_proposals(self, seen_ids, gcs_client: 'GCSClient') -> bool:
+        """Retire live proposals that vanished from Snapshot (edited/deleted).
+
+        A proposal is retired only after it is confirmed absent from both the space
+        list AND a direct id lookup, on SNAPSHOT_DELETION_MISS_THRESHOLD consecutive
+        syncs. Flagged proposals (dropped from the flagged:false list but still
+        resolvable by id) and transient drops never get retired; API errors during
+        verification are never read as deletions.
+        """
+        prefix = f"data/{self.infra_dao_slug}/proposal/{self.SOURCE}/raw/"
+        blobs = await gcs_client.list_blobs(prefix=prefix)
+
+        changed = False
+        for blob in blobs:
+            if not blob.name.endswith('.json.gz'):
+                continue
+
+            data = await gcs_client.read_dict(blob.name)
+            if not data:
+                continue
+
+            props = data.get('data_eng_properties', {})
+            # Only live proposals can transition to deleted; archived/deleted are terminal.
+            if props.get('liveness') != 'live':
+                continue
+
+            proposal_id = data.get('id')
+            if proposal_id is None:
+                continue
+
+            prior_strikes = props.get('missing_count', 0)
+
+            present = proposal_id in seen_ids
+            if not present:
+                try:
+                    present = await self.sc.get_proposal(proposal_id) is not None
+                except Exception as e:
+                    print(f"snapshot: could not verify {proposal_id}, skipping: {e}")
+                    continue
+
+            if present:
+                if prior_strikes:
+                    await self._write_snapshot_record(data, 'live', gcs_client, missing_count=0)
+                    changed = True
+                continue
+
+            strikes = prior_strikes + 1
+            if strikes < SNAPSHOT_DELETION_MISS_THRESHOLD:
+                await self._write_snapshot_record(data, 'live', gcs_client, missing_count=strikes)
+            else:
+                await self._write_snapshot_record(
+                    data, 'deleted', gcs_client, missing_count=strikes, deleted_at=int(time.time())
+                )
+            changed = True
+
+        return changed
+
+    async def _write_snapshot_record(
+        self, proposal, liveness, gcs_client: 'GCSClient', *, missing_count=0, deleted_at=None
+    ):
+        """Rewrite a proposal blob with updated liveness / strike metadata, preserving
+        the existing content hash so a strike or tombstone is not seen as a content
+        change by hash-based consumers (only liveness flips)."""
+        props = proposal.setdefault('data_eng_properties', {})
+        proposal_hash = props.get('hash')
+
+        props['liveness'] = liveness
+        props['source'] = self.SOURCE
+        props['hash'] = proposal_hash
+        if missing_count:
+            props['missing_count'] = missing_count
+        else:
+            props.pop('missing_count', None)
+        if deleted_at is not None:
+            props['deleted_at'] = deleted_at
+
+        metadata = {
+            'proposal_id': proposal['id'],
+            'liveness': liveness,
+            'source': self.SOURCE,
+            'hash': proposal_hash,
+            'num_of_votes': proposal.get('num_of_votes', 0),
+        }
+
+        cache_contr = self.calc_cache_control(liveness)
+        await gcs_client.upload_dict(
+            proposal, self.proposal_blob_name(proposal['id']), metadata=metadata, cache_control=cache_contr
+        )
 
 
 

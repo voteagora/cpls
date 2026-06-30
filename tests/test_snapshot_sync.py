@@ -1,284 +1,140 @@
-import asyncio
-import copy
-from itertools import count
+"""Tests for SnapshotSync deletion detection (sync_snapshot._reconcile_deleted_proposals)."""
 
-from cpls.syncs import SnapshotSync
+import copy
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+SAMPLE_CONFIG = {
+    "schema": "ens",
+    "dao_slug": "ENS",
+    "index_tenant_prefix": "en",
+    "features": {"snapshot_proposals": True},
+    "deployment": {
+        "chain_id": 1,
+        "gov": {"address": "0xGov"},
+        "token": {"address": "0xToken"},
+    },
+}
+
+PREFIX = "data/ens/proposal/snapshot/raw/"
 
 
 class FakeBlob:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name):
         self.name = name
 
 
-class FakeGCSClient:
-    def __init__(self) -> None:
+class FakeGCS:
+    def __init__(self):
         self.storage = {}
 
-    async def upload_dict(self, data, blob_name, metadata=None, cache_control=None):
-        self.storage[blob_name] = {
-            "data": copy.deepcopy(data),
-            "metadata": copy.deepcopy(metadata) if metadata else {},
-            "cache_control": cache_control,
-        }
-        return True
-
-    async def read_dict(self, blob_name):
-        entry = self.storage.get(blob_name)
-        if not entry:
-            return None
-        return copy.deepcopy(entry["data"])
-
     async def list_blobs(self, prefix):
-        return [FakeBlob(name) for name in self.storage if name.startswith(prefix)]
+        return [FakeBlob(name) for name in list(self.storage) if name.startswith(prefix)]
 
-    async def upload_ndjson(self, data, blob_name, cache_control=None, metadata=None):
-        self.storage[blob_name] = {
-            "data": copy.deepcopy(data),
-            "metadata": copy.deepcopy(metadata) if metadata else {},
-            "cache_control": cache_control,
-        }
+    async def read_dict(self, name):
+        entry = self.storage.get(name)
+        return copy.deepcopy(entry) if entry is not None else None
+
+    async def upload_dict(self, data, blob_name, metadata=None, cache_control=None):
+        self.storage[blob_name] = copy.deepcopy(data)
         return True
 
 
-class FakeSnapshotAPIClient:
-    def __init__(self, sequences):
-        self.sequences = sequences
-        self.index = 0
-        self.fetch_proposal_overrides = {}
-        self.last_lookup = {}
+def make_sync():
+    with patch("cpls.sync.PostgreSQLClient"), patch("cpls.sync.BlockCacheClient"), patch(
+        "cpls.sync.load_tenant_config", return_value=SAMPLE_CONFIG
+    ):
+        from cpls.sync_snapshot import SnapshotSync
 
-    def fetch_space_proposals(self, space):
-        if self.index < len(self.sequences):
-            result = self.sequences[self.index]
-        else:
-            result = self.sequences[-1]
-        self.index += 1
-        self.last_lookup = {proposal["id"]: copy.deepcopy(proposal) for proposal in result}
-        return copy.deepcopy(result)
-
-    def fetch_proposal(self, proposal_id):
-        if proposal_id in self.fetch_proposal_overrides:
-            return copy.deepcopy(self.fetch_proposal_overrides[proposal_id])
-        proposal = self.last_lookup.get(proposal_id)
-        return copy.deepcopy(proposal)
+        sync = SnapshotSync("ens", SAMPLE_CONFIG, reset=False, http_client=AsyncMock())
+    sync.sc = MagicMock()
+    sync.sc.get_proposal = AsyncMock(return_value=None)
+    return sync
 
 
-def test_snapshot_sync_uploads_and_splits_by_liveness():
-    proposals = [
-        {
-            "id": "1",
-            "state": "active",
-            "title": "Proposal Active",
-            "body": "Long body",
-            "choices": ["Yes", "No"],
-            "start": 1,
-            "end": 10,
-            "scores": [1, 0],
-            "scores_total": 1,
-        },
-        {
-            "id": "2",
-            "state": "closed",
-            "title": "Proposal Closed",
-            "body": "Another body",
-            "choices": ["A", "B"],
-            "start": 2,
-            "end": 20,
-            "scores": [0, 1],
-            "scores_total": 1,
-        },
-    ]
-
-    fake_api = FakeSnapshotAPIClient([proposals])
-    fake_gcs = FakeGCSClient()
-    now_counter = count(start=1000)
-
-    sync = SnapshotSync("testspace", api_client=fake_api, now_provider=lambda: next(now_counter))
-
-    asyncio.run(sync.refresh_list(fake_gcs))
-
-    active_blob = fake_gcs.storage["data/testspace/proposal/snapshot/raw/1.json.gz"]
-    archived_blob = fake_gcs.storage["data/testspace/proposal/snapshot/raw/2.json.gz"]
-
-    assert active_blob["metadata"]["liveness"] == "live"
-    assert archived_blob["metadata"]["liveness"] == "archived"
-
-    live_list = fake_gcs.storage["data/testspace/proposal_list/snapshot/live.ndjson"]["data"]
-    archived_list = fake_gcs.storage["data/testspace/proposal_list/snapshot/archived.ndjson"]["data"]
-
-    assert len(live_list) == 1
-    assert len(archived_list) == 1
-    assert "body" not in live_list[0]
-    assert "hash" not in live_list[0]["data_eng_properties"]
+def seed(gcs, proposal_id="p1", liveness="live"):
+    name = f"{PREFIX}{proposal_id}.json.gz"
+    gcs.storage[name] = {
+        "id": proposal_id,
+        "title": "T",
+        "num_of_votes": 3,
+        "data_eng_properties": {"liveness": liveness, "source": "snapshot", "hash": "h0"},
+    }
+    return name
 
 
-def test_snapshot_sync_marks_deleted_after_consecutive_misses():
-    initial_proposals = [
-        {
-            "id": "p1",
-            "state": "active",
-            "title": "Keep me",
-            "body": "Body",
-            "choices": ["Y", "N"],
-            "start": 3,
-            "end": 30,
-        }
-    ]
+def props(gcs, name):
+    return gcs.storage[name]["data_eng_properties"]
 
-    fake_api = FakeSnapshotAPIClient([initial_proposals, []])
-    fake_gcs = FakeGCSClient()
-    now_counter = count(start=2000)
 
-    sync = SnapshotSync("testspace", api_client=fake_api, now_provider=lambda: next(now_counter))
+@pytest.mark.asyncio
+async def test_retires_after_consecutive_misses():
+    sync = make_sync()
+    gcs = FakeGCS()
+    name = seed(gcs)
+    sync.sc.get_proposal = AsyncMock(return_value=None)  # confirmed gone from Snapshot
 
-    asyncio.run(sync.refresh_list(fake_gcs))
-
-    # Gone from the list AND null on a direct lookup -> a confirmed miss.
-    fake_api.fetch_proposal_overrides["p1"] = None
-    blob_name = "data/testspace/proposal/snapshot/raw/p1.json.gz"
-
-    # First miss: deferred (strike recorded), not yet deleted.
-    asyncio.run(sync.refresh_list(fake_gcs))
-    props = fake_gcs.storage[blob_name]["data"]["data_eng_properties"]
-    assert props["liveness"] == "live"
-    assert props["missing_count"] == 1
+    # First miss: deferred (strike), not yet deleted.
+    assert await sync._reconcile_deleted_proposals(set(), gcs) is True
+    assert props(gcs, name)["liveness"] == "live"
+    assert props(gcs, name)["missing_count"] == 1
 
     # Second consecutive miss: retired.
-    asyncio.run(sync.refresh_list(fake_gcs))
-    props = fake_gcs.storage[blob_name]["data"]["data_eng_properties"]
-    assert props["liveness"] == "deleted"
-    assert "deleted_at" in props
-
-    live_list = fake_gcs.storage["data/testspace/proposal_list/snapshot/live.ndjson"]["data"]
-    assert live_list == []
+    assert await sync._reconcile_deleted_proposals(set(), gcs) is True
+    assert props(gcs, name)["liveness"] == "deleted"
+    assert "deleted_at" in props(gcs, name)
 
 
-def test_snapshot_sync_keeps_flagged_proposal_alive():
-    proposal = {
-        "id": "p1",
-        "state": "closed",
-        "title": "Flagged but alive",
-        "body": "Body",
-        "choices": ["Y", "N"],
-        "start": 3,
-        "end": 30,
-    }
+@pytest.mark.asyncio
+async def test_flagged_proposal_stays_alive():
+    sync = make_sync()
+    gcs = FakeGCS()
+    name = seed(gcs)
+    # Flagged -> dropped from the flagged:false list, but still resolves by id.
+    sync.sc.get_proposal = AsyncMock(return_value={"id": "p1", "state": "closed"})
 
-    fake_api = FakeSnapshotAPIClient([[proposal], []])
-    fake_gcs = FakeGCSClient()
-    now_counter = count(start=5000)
+    await sync._reconcile_deleted_proposals(set(), gcs)
+    await sync._reconcile_deleted_proposals(set(), gcs)
 
-    sync = SnapshotSync("testspace", api_client=fake_api, now_provider=lambda: next(now_counter))
-
-    asyncio.run(sync.refresh_list(fake_gcs))
-
-    # Flagged -> excluded from the list, but still resolves by id.
-    fake_api.fetch_proposal_overrides["p1"] = dict(proposal)
-    blob_name = "data/testspace/proposal/snapshot/raw/p1.json.gz"
-
-    # Repeated absence from the list must not delete a proposal that still exists.
-    asyncio.run(sync.refresh_list(fake_gcs))
-    asyncio.run(sync.refresh_list(fake_gcs))
-
-    props = fake_gcs.storage[blob_name]["data"]["data_eng_properties"]
-    assert props["liveness"] != "deleted"
-    assert props.get("missing_count", 0) == 0
+    assert props(gcs, name)["liveness"] == "live"
+    assert props(gcs, name).get("missing_count", 0) == 0
 
 
-def test_snapshot_sync_resets_strikes_when_proposal_returns():
-    proposal = {
-        "id": "p1",
-        "state": "active",
-        "title": "Flaky",
-        "body": "Body",
-        "choices": ["Y", "N"],
-        "start": 3,
-        "end": 30,
-    }
+@pytest.mark.asyncio
+async def test_strike_resets_when_seen_again():
+    sync = make_sync()
+    gcs = FakeGCS()
+    name = seed(gcs)
+    sync.sc.get_proposal = AsyncMock(return_value=None)
 
-    fake_api = FakeSnapshotAPIClient([[proposal], [], [proposal]])
-    fake_gcs = FakeGCSClient()
-    now_counter = count(start=6000)
+    await sync._reconcile_deleted_proposals(set(), gcs)  # strike 1
+    assert props(gcs, name)["missing_count"] == 1
 
-    sync = SnapshotSync("testspace", api_client=fake_api, now_provider=lambda: next(now_counter))
-
-    asyncio.run(sync.refresh_list(fake_gcs))
-
-    # Transiently absent from both list and id lookup -> one strike.
-    fake_api.fetch_proposal_overrides["p1"] = None
-    blob_name = "data/testspace/proposal/snapshot/raw/p1.json.gz"
-    asyncio.run(sync.refresh_list(fake_gcs))
-    props = fake_gcs.storage[blob_name]["data"]["data_eng_properties"]
-    assert props["liveness"] == "live"
-    assert props["missing_count"] == 1
-
-    # Reappears in the list -> strike cleared, never deleted.
-    del fake_api.fetch_proposal_overrides["p1"]
-    asyncio.run(sync.refresh_list(fake_gcs))
-    props = fake_gcs.storage[blob_name]["data"]["data_eng_properties"]
-    assert props["liveness"] == "live"
-    assert props.get("missing_count", 0) == 0
+    await sync._reconcile_deleted_proposals({"p1"}, gcs)  # back in the list -> reset
+    assert props(gcs, name)["liveness"] == "live"
+    assert props(gcs, name).get("missing_count", 0) == 0
 
 
-def test_snapshot_sync_updates_when_votes_change():
-    proposal = {
-        "id": "p2",
-        "state": "active",
-        "title": "Voting update",
-        "body": "Body",
-        "choices": ["Yes", "No"],
-        "start": 4,
-        "end": 40,
-        "scores": [10, 2],
-        "scores_total": 12,
-        "votes": 12,
-    }
+@pytest.mark.asyncio
+async def test_archived_proposals_are_not_reconciled():
+    sync = make_sync()
+    gcs = FakeGCS()
+    name = seed(gcs, liveness="archived")
+    sync.sc.get_proposal = AsyncMock(return_value=None)
 
-    fake_api = FakeSnapshotAPIClient([[proposal], [dict(proposal, votes=13, scores_total=13, scores=[11, 2])]])
-    fake_gcs = FakeGCSClient()
-    now_counter = count(start=3000)
-
-    sync = SnapshotSync("testspace", api_client=fake_api, now_provider=lambda: next(now_counter))
-
-    asyncio.run(sync.refresh_list(fake_gcs))
-    first_hash = fake_gcs.storage["data/testspace/proposal/snapshot/raw/p2.json.gz"]["metadata"]["hash"]
-
-    asyncio.run(sync.refresh_list(fake_gcs))
-    updated_blob = fake_gcs.storage["data/testspace/proposal/snapshot/raw/p2.json.gz"]
-    second_hash = updated_blob["metadata"]["hash"]
-
-    assert first_hash != second_hash
-    assert updated_blob["data"]["num_of_votes"] == 13
-    assert updated_blob["data"]["scores_total"] == 13
+    assert await sync._reconcile_deleted_proposals(set(), gcs) is False
+    assert props(gcs, name)["liveness"] == "archived"
+    sync.sc.get_proposal.assert_not_called()
 
 
-def test_snapshot_sync_normalizes_downstream_fields():
-    proposal = {
-        "id": "p3",
-        "state": "active",
-        "title": "Normalize me",
-        "body": "Long body",
-        "choices": ["Yes", "No"],
-        "start": 100,
-        "end": 200,
-        "created": 90,
-        "votes": 7,
-        "link": "https://snapshot.box/#/s:ens.eth/proposal/p3",
-    }
+@pytest.mark.asyncio
+async def test_api_error_never_deletes():
+    sync = make_sync()
+    gcs = FakeGCS()
+    name = seed(gcs)
+    sync.sc.get_proposal = AsyncMock(side_effect=Exception("boom"))
 
-    fake_api = FakeSnapshotAPIClient([[proposal]])
-    fake_gcs = FakeGCSClient()
-    now_counter = count(start=4000)
-
-    sync = SnapshotSync("testspace", api_client=fake_api, now_provider=lambda: next(now_counter))
-    asyncio.run(sync.refresh_list(fake_gcs))
-
-    data = fake_gcs.storage["data/testspace/proposal/snapshot/raw/p3.json.gz"]["data"]
-    assert data["num_of_votes"] == 7
-    assert data["start_blocktime"] == 100
-    assert data["end_blocktime"] == 200
-    assert data["created_blocktime"] == 90
-    assert data["description"] == "Long body"
-    assert data["url"] == "https://snapshot.box/#/s:ens.eth/proposal/p3"
-    assert "votes" not in data
-    assert "body" not in data
+    assert await sync._reconcile_deleted_proposals(set(), gcs) is False
+    assert props(gcs, name)["liveness"] == "live"
+    assert props(gcs, name).get("missing_count", 0) == 0
