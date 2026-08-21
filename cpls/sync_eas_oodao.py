@@ -334,7 +334,6 @@ class EASOoDaoSync(Sync):
                 skipped_count += 1
                 continue
 
-            proposal_already_saved = existing_liveness != 'new'
             has_check_attestation = proposal_id in checks
 
             proposal['tags'] = proposal['tags'].split(',')
@@ -348,8 +347,7 @@ class EASOoDaoSync(Sync):
             
             default_type_ranges = default_type_ranges_cache[module]
 
-            # Check if this proposal has already failed validation before
-            if not has_check_attestation and not proposal_already_saved:
+            if not has_check_attestation:
                 attester = to_eth_address(proposal_meta['author'])
                 validation_passed = await self.validate_proposal(proposal_id, attester, proposal['tags'])
                 if not validation_passed:
