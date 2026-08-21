@@ -361,6 +361,55 @@ class TestOoDaoRefreshListValidationFailed:
         assert metadata["liveness"] == "unqualified"
 
 
+class TestOoDaoRefreshListSavedWithoutCheck:
+
+    @pytest.mark.asyncio
+    async def test_saved_proposal_without_check_is_unqualified_when_validation_fails(
+        self, mocked_oodao, mock_gcs_client
+    ):
+        sync, mock_http, mock_bc, mock_pg, mock_conn = mocked_oodao
+
+        now = int(time.time())
+        prop_row = make_proposal_row(startts=now - 3600, endts=now + 3600)
+
+        call_count = [0]
+        async def multi_fetch(qry=None, *args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return [prop_row]
+            elif call_count[0] == 2:
+                return []
+            elif call_count[0] == 3:
+                return []
+            return []
+
+        mock_conn.fetch = AsyncMock(side_effect=multi_fetch)
+        mock_conn.fetchrow = AsyncMock(return_value={
+            "min_quorum_pct": "1000",
+            "max_quorum_pct": "5000",
+            "min_approval_threshold_pct": "5000",
+            "max_approval_threshold_pct": "7500",
+        })
+
+        val_resp = MagicMock()
+        val_resp.json.return_value = {"success": False}
+        val_resp.raise_for_status = MagicMock()
+        mock_http.post = AsyncMock(return_value=val_resp)
+
+        mock_blob = MagicMock()
+        mock_blob.exists.return_value = True
+        mock_blob.metadata = {"liveness": "live", "hash": "existinghash", "num_of_votes": "0"}
+        mock_gcs_client.get_blob = AsyncMock(return_value=mock_blob)
+        mock_gcs_client.list_blobs = AsyncMock(return_value=[])
+
+        result = await sync.refresh_list(mock_gcs_client)
+
+        assert result["skipped"] == 1
+        mock_http.post.assert_called_once()
+        metadata = mock_gcs_client.upload_dict.call_args_list[0][1]["metadata"]
+        assert metadata["liveness"] == "unqualified"
+
+
 class TestOoDaoRefreshListPendingProposal:
 
     @pytest.mark.asyncio
