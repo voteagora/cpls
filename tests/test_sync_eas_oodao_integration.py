@@ -636,6 +636,33 @@ class TestOoDaoStandardEndedLifecycle:
         uploaded = mock_gcs_client.upload_dict.call_args_list[0][0][0]
         assert uploaded["lifecycle_stage"] == "DEFEATED"
 
+    @pytest.mark.asyncio
+    async def test_standard_ended_passed_low_turnout_unanimous(self, mocked_oodao, mock_gcs_client):
+        """Approval threshold applies to votes cast, not total supply.
+
+        Mirrors Syndicate temp check 0x1d16...775f: ~20.8% turnout, all For.
+        Quorum 5% of supply is met; approval 50.01% of (For + Against) is met.
+        """
+        sync, mock_http, mock_bc, mock_pg, mock_conn = mocked_oodao
+
+        # supply=100000 -> quorum=500/10000*100000=5000; for=20800 (20.8% of supply)
+        prop_type = {"eas_uid": "0xPT", "name": "Temp-Check", "class": "STANDARD",
+                     "quorum": 500, "approval_threshold": 5001}
+        _setup_ended_proposal(mock_conn, mock_http, mock_bc, mock_gcs_client,
+                              voting_module="standard",
+                              votes=[
+                                  make_vote_row("0xV1", 1, 10000),  # for
+                                  make_vote_row("0xV2", 1, 10800),  # for
+                              ],
+                              approved_prop_type=prop_type)
+
+        result = await sync.refresh_list(mock_gcs_client)
+        assert result["refreshed"] == 1
+        uploaded = mock_gcs_client.upload_dict.call_args_list[0][0][0]
+        assert uploaded["lifecycle_stage"] == "PASSED"
+        assert uploaded["quorum_check"] is True
+        assert uploaded["approval_check"] is True
+
 
 class TestOoDaoApprovalVotingFlow:
 

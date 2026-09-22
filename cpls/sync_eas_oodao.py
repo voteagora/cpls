@@ -799,14 +799,24 @@ class EASOoDaoSync(Sync):
                         else:
                             proposal['lifecycle_stage'] = 'SUCCEEDED'
                 else:
+                    # For STANDARD type:
+                    # Quorum = all votes cast (for + against + abstain), measured
+                    #          against total voting power at start.
+                    # Approval = for / (for + against), abstain excluded, measured
+                    #            against approval_threshold (bps). Mirrors
+                    #            agora-next deriveStandardStatus.
 
-                    # TODO - Count Abstain?
+                    outcome_data = proposal['outcome']['token-holders']
+
+                    for_votes = int(outcome_data.get('1', 0))
+                    against_votes = int(outcome_data.get('0', 0))
 
                     passing_quorum = (proposal['proposal_type']['quorum'] / 10000) * int(proposal['total_voting_power_at_start'])
-                    passing_approval_threshold = (proposal['proposal_type']['approval_threshold'] / 10000) * int(proposal['total_voting_power_at_start'])
+                    quorum_check = sum([int(weight) for weight in outcome_data.values()]) >= passing_quorum
 
-                    quorum_check = sum([int(weight) for weight in proposal['outcome']['token-holders'].values()]) >= passing_quorum
-                    approval_check = int(proposal['outcome']['token-holders'].get('1', 0)) >= passing_approval_threshold
+                    approval_threshold = int(proposal['proposal_type']['approval_threshold'])
+                    decisive_votes = for_votes + against_votes
+                    approval_check = decisive_votes > 0 and (for_votes * 10000) >= (approval_threshold * decisive_votes)
 
                     proposal['quorum_check'] = quorum_check
                     proposal['approval_check'] = approval_check

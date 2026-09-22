@@ -56,17 +56,17 @@ class TestOoDaoLifecycleDetermination:
                 passing_quorum = (proposal["proposal_type"]["quorum"] / 10000) * int(
                     proposal["total_voting_power_at_start"]
                 )
-                passing_approval_threshold = (
-                    proposal["proposal_type"]["approval_threshold"] / 10000
-                ) * int(proposal["total_voting_power_at_start"])
+                outcome_data = proposal["outcome"]["token-holders"]
+                for_votes = int(outcome_data.get("1", 0))
+                against_votes = int(outcome_data.get("0", 0))
 
-                total_weight = sum(
-                    int(w) for w in proposal["outcome"]["token-holders"].values()
-                )
+                total_weight = sum(int(w) for w in outcome_data.values())
                 quorum_check = total_weight >= passing_quorum
-                approval_check = (
-                    int(proposal["outcome"]["token-holders"].get("1", 0))
-                    >= passing_approval_threshold
+
+                approval_threshold = int(proposal["proposal_type"]["approval_threshold"])
+                decisive_votes = for_votes + against_votes
+                approval_check = decisive_votes > 0 and (
+                    for_votes * 10000 >= approval_threshold * decisive_votes
                 )
 
                 if quorum_check and approval_check:
@@ -169,11 +169,11 @@ class TestOoDaoLifecycleDetermination:
 
     def test_standard_defeated_approval_not_met(self):
         proposal = {
-            "outcome": {"token-holders": {"0": "4000", "1": "4000", "2": "1000"}},
+            "outcome": {"token-holders": {"0": "5000", "1": "4000", "2": "1000"}},
             "proposal_type": {"quorum": 5000, "approval_threshold": 5000},
             "total_voting_power_at_start": "10000",
         }
-        # Total 9000 >= 5000 quorum, but for 4000 < 5000 approval → DEFEATED
+        # Total 10000 >= 5000 quorum, but for 4000/9000 = 44% < 50% approval → DEFEATED
         result = self.determine_lifecycle(proposal, curts=300, startts=100, endts=200, proposal_type_name="STANDARD")
         assert result == "DEFEATED"
 
@@ -186,3 +186,36 @@ class TestOoDaoLifecycleDetermination:
         # Total 5000 == 5000 quorum, for 5000 == 5000 approval → PASSED
         result = self.determine_lifecycle(proposal, curts=300, startts=100, endts=200, proposal_type_name="STANDARD")
         assert result == "PASSED"
+
+    def test_standard_passed_low_turnout_unanimous(self):
+        # Syndicate temp check 0x1d16…775f: 4 For votes, no Against, ~20.8% of
+        # supply turned out. Quorum is 5% of supply; approval is 50.01% of votes
+        # cast (For + Against), NOT of total supply.
+        proposal = {
+            "outcome": {"token-holders": {"1": "193979773020000000000000000"}},
+            "proposal_type": {"quorum": 500, "approval_threshold": 5001},
+            "total_voting_power_at_start": "933333333333333333333333328",
+        }
+        result = self.determine_lifecycle(proposal, curts=300, startts=100, endts=200, proposal_type_name="STANDARD")
+        assert result == "PASSED"
+
+    def test_standard_abstain_excluded_from_approval(self):
+        proposal = {
+            "outcome": {"token-holders": {"0": "2000", "1": "3000", "2": "5000"}},
+            "proposal_type": {"quorum": 5000, "approval_threshold": 5000},
+            "total_voting_power_at_start": "10000",
+        }
+        # Total 10000 >= 5000 quorum (abstain counts toward quorum).
+        # Approval 3000/(3000+2000) = 60% >= 50% (abstain excluded) → PASSED
+        result = self.determine_lifecycle(proposal, curts=300, startts=100, endts=200, proposal_type_name="STANDARD")
+        assert result == "PASSED"
+
+    def test_standard_no_decisive_votes_defeated(self):
+        proposal = {
+            "outcome": {"token-holders": {"2": "8000"}},
+            "proposal_type": {"quorum": 5000, "approval_threshold": 5000},
+            "total_voting_power_at_start": "10000",
+        }
+        # Quorum met on abstain alone, but no For/Against votes → DEFEATED
+        result = self.determine_lifecycle(proposal, curts=300, startts=100, endts=200, proposal_type_name="STANDARD")
+        assert result == "DEFEATED"

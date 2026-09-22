@@ -325,6 +325,10 @@ elif current_time >= end_time:
         lifecycle_stage = 'DEFEATED'
 ```
 
+**STANDARD threshold checks** (`quorum` and `approval_threshold` are in basis points):
+- `quorum_check`: all votes cast (For + Against + Abstain) `>= quorum / 10000 * total_voting_power_at_start`
+- `approval_check`: `For / (For + Against) >= approval_threshold / 10000`. Abstain is excluded, and a proposal with no For or Against votes fails. This mirrors `deriveStandardStatus` in agora-next.
+
 ---
 
 ## Job Processing System
@@ -798,8 +802,8 @@ Health check endpoint.
 | `proposal_type` | object | Type configuration |
 | `proposal_type_approval` | string | "APPROVED", "PENDING", "ERROR" |
 | `outcome.token-holders` | object | Vote tallies |
-| `quorum_check` | bool | Passed quorum threshold |
-| `approval_check` | bool | Passed approval threshold |
+| `quorum_check` | bool | All votes cast met `quorum` bps of total voting power at start |
+| `approval_check` | bool | For / (For + Against) met `approval_threshold` bps (Abstain excluded) |
 
 ### Snapshot-Specific Fields
 
