@@ -15,7 +15,8 @@ from fastapi.responses import HTMLResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import uvicorn
 
-from .ui import generate_dashboard_html
+from .ui import generate_dashboard_html, generate_proposal_html
+from .proposal_lookup import PROPOSAL_SOURCES, lookup_proposal, is_valid_tenant, is_valid_proposal_id
 from .gcs import GCSClient
 from .jobs import JobQueue, JobRequest, JobStatus
 from .observability import setup_logging
@@ -200,6 +201,47 @@ async def job_dashboard():
     """
     jobs = job_queue.get_all_jobs()
     return generate_dashboard_html(jobs, JobStatus)
+
+
+@app.get("/proposals", response_class=HTMLResponse)
+async def proposal_lookup_page(tenant: str = "", proposal_id: str = "", source: str = ""):
+    """
+    GET endpoint that serves a UI to look up a proposal's latest raw blob
+    (metadata + contents) by tenant and proposal id. Probes every source
+    unless ?source= narrows it.
+    """
+    tenant = tenant.strip()
+    proposal_id = proposal_id.strip()
+    source = source.strip()
+
+    def render(results, error=None, status_code=200):
+        page = generate_proposal_html(
+            tenant, proposal_id, source, results,
+            error=error, tenant_options=INFRA_DAO_SLUGS,
+        )
+        return HTMLResponse(page, status_code=status_code)
+
+    # Blank form
+    if not tenant or not proposal_id:
+        return render([])
+
+    if not is_valid_tenant(tenant):
+        return render([], error=f"Invalid tenant '{tenant}': expected lowercase letters, digits, '-' or '_'.", status_code=400)
+
+    if not is_valid_proposal_id(proposal_id):
+        return render([], error=f"Invalid proposal ID '{proposal_id}': expected a decimal number or 0x-prefixed hash.", status_code=400)
+
+    if source and source not in PROPOSAL_SOURCES:
+        return render([], error=f"Unknown source '{source}'. Expected one of: {', '.join(PROPOSAL_SOURCES)}.", status_code=400)
+
+    sources = [source] if source else PROPOSAL_SOURCES
+
+    try:
+        results = await lookup_proposal(gcs_client, tenant, proposal_id, sources)
+    except Exception as e:
+        return render([], error=f"GCS error: {e}", status_code=502)
+
+    return render(results, status_code=200 if results else 404)
 
 
 @app.get("/health")
