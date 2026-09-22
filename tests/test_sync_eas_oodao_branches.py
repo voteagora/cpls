@@ -270,6 +270,34 @@ class TestValidateProposalPaths:
         result = await sync.validate_proposal("0xProp", "0xAttester", ["gov-proposal"])
         assert result is False
 
+    @pytest.mark.asyncio
+    async def test_dao_in_skip_list_bypasses_check(self):
+        """SKIP_PROPOSAL_CHECK_DAOS containing this DAO → True, no HTTP call."""
+        sync, mock_http, _, _ = make_sync()
+        with patch("cpls.sync_eas_oodao.SKIP_PROPOSAL_CHECK_DAOS", {"optimism"}):
+            result = await sync.validate_proposal("0xProp", "0xAttester", ["gov-proposal"])
+        assert result is True
+        mock_http.post.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_wildcard_skip_list_bypasses_check(self):
+        """SKIP_PROPOSAL_CHECK_DAOS='*' → True for any DAO, no HTTP call."""
+        sync, mock_http, _, _ = make_sync()
+        with patch("cpls.sync_eas_oodao.SKIP_PROPOSAL_CHECK_DAOS", {"*"}):
+            result = await sync.validate_proposal("0xProp", "0xAttester", ["gov-proposal"])
+        assert result is True
+        mock_http.post.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_dao_not_in_skip_list_still_checks(self):
+        """Other DAOs in SKIP_PROPOSAL_CHECK_DAOS do not affect this one."""
+        sync, mock_http, _, _ = make_sync()
+        mock_http.post = AsyncMock(side_effect=Exception("Connection refused"))
+        with patch("cpls.sync_eas_oodao.SKIP_PROPOSAL_CHECK_DAOS", {"towns"}):
+            result = await sync.validate_proposal("0xProp", "0xAttester", ["gov-proposal"])
+        assert result is False
+        mock_http.post.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # kwargs processing branches

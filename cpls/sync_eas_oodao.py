@@ -3,7 +3,7 @@ from collections import defaultdict
 
 from .sync import Sync, SkipProposal, FIVE_MINUTES_IN_SECONDS, to_eth_address
 from .gcs import GCSClient
-from .config import PROPOSAL_CHECK_SECRET, get_proposal_check_api_url
+from .config import PROPOSAL_CHECK_SECRET, SKIP_PROPOSAL_CHECK_DAOS, get_proposal_check_api_url
 
 OODAO = {
     11155111 : {
@@ -238,6 +238,10 @@ class EASOoDaoSync(Sync):
 
 
     async def validate_proposal(self, proposal_id: str, attester: str, tags: list) -> bool:
+        if '*' in SKIP_PROPOSAL_CHECK_DAOS or self.infra_dao_slug in SKIP_PROPOSAL_CHECK_DAOS:
+            print(f"Proposal {proposal_id}: skipping proposal check for {self.infra_dao_slug} (SKIP_PROPOSAL_CHECK_DAOS)")
+            return True
+
         api_url = get_proposal_check_api_url(self.infra_dao_slug)
         if not api_url or not PROPOSAL_CHECK_SECRET:
             return False

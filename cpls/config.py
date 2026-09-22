@@ -26,6 +26,9 @@ INFRA_DAO_SLUGS = INFRA_DAO_SLUGS.split(',')
 RESET_PROPOSALS_ON_RESTART = os.getenv("RESET_PROPOSALS_ON_RESTART", "true").lower() == "true"
 PROPOSAL_CHECK_API_URL = os.getenv("PROPOSAL_CHECK_API_URL", "")
 PROPOSAL_CHECK_SECRET = os.getenv("PROPOSAL_CHECK_SECRET", "")
+# Comma-separated infra DAO slugs for which the external proposal check is bypassed
+# (all proposals let through). "*" bypasses it for every DAO.
+SKIP_PROPOSAL_CHECK_DAOS = {s.strip() for s in os.getenv("SKIP_PROPOSAL_CHECK_DAOS", "").split(",") if s.strip()}
 DAO_NODE_URL_TEMPLATE = os.getenv("DAO_NODE_URL_TEMPLATE", "https://dao-node-{tenant_namespace}-"+ DEPLOYMENT + ("-dev" if DEPLOYMENT == "test" else "-prod") + ".up.railway.app")
 
 # Axiom observability (emit_event no-ops if either is unset)
