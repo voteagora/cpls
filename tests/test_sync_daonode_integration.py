@@ -181,6 +181,49 @@ class TestDaoNodeRefreshListCensoredProposal:
         assert result["refreshed"] == 0
         assert result["skipped"] == 0  # Censored proposals are `continue`d, not counted as skipped
 
+    @pytest.mark.asyncio
+    async def test_civic_censored_proposals_skipped(self, mock_gcs_client):
+        """The two civic ids in CENSORED_PROPOSALS['civic'] are never fetched or written."""
+        from cpls.sync_daonode import DaoNodeSync, CENSORED_PROPOSALS, CENSORED_PROPOSAL_IDS
+
+        civic_ids = CENSORED_PROPOSALS["civic"]
+        assert "97643531218001030483376933426399412603268315291935832022361401994044733090294" in civic_ids
+        assert "19724146153715880153931494206114864393960887466004552027513847803351434887864" in civic_ids
+        assert set(civic_ids) <= CENSORED_PROPOSAL_IDS
+
+        civic_config = {
+            "schema": "civic",
+            "dao_slug": "CIVIC",
+            "index_tenant_prefix": "multi_civic",
+            "features": {"dao_node_proposals": True},
+            "deployment": {
+                "chain_id": 8453,
+                "gov": {"address": "0xGovAddr"},
+                "token": {"address": "0xTokenAddr"},
+            },
+        }
+
+        with patch("cpls.sync.PostgreSQLClient"), patch("cpls.sync.BlockCacheClient"):
+            mock_http = AsyncMock()
+            sync = DaoNodeSync("civic", civic_config, reset=False, http_client=mock_http)
+            sync.bc = MagicMock()
+            sync.bc.clear_lru = MagicMock()
+
+            progress_resp = MagicMock()
+            progress_resp.json.return_value = {"block": 500}
+            proposals_resp = MagicMock()
+            proposals_resp.json.return_value = {"proposals": [make_proposal_info(pid) for pid in civic_ids]}
+            mock_http.get = AsyncMock(side_effect=[progress_resp, proposals_resp])
+
+            result = await sync.refresh_list(mock_gcs_client)
+
+        assert result["refreshed"] == 0
+        assert result["skipped"] == 0
+        # Never looked at GCS for these ids, never fetched detail, never uploaded.
+        mock_gcs_client.get_blob.assert_not_called()
+        mock_gcs_client.upload_dict.assert_not_called()
+        assert mock_http.get.await_count == 2
+
 
 class TestDaoNodeReadQuorum:
     """Test read_quorum for various DAO-specific branching."""
